@@ -15,6 +15,14 @@ const C = {
 const FONT = "'DM Sans',system-ui,sans-serif";
 const SERIF = "'Cormorant Garamond','Georgia',serif";
 
+/* ── Per-m² panel SKUs (priced per square metre — need W×H input) ── */
+const PER_SQM_SKUS = new Set([
+  'ST 10-00-02','ST 16-00-02','ST 25-00-02','ST 50-00-02',
+  'WS 10-00-02','WS 16-00-02','WS 25-00-02','WS 50-00-02',
+  'WN 16-00-02','WN 25-00-02','WN 50-00-02',
+  'WW 16-00-02','WW 25-00-02','WW 50-00-02',
+]);
+
 /* ── Dimension-based special construction codes ── */
 const DIMENSION_SC = {
   'X-01-H':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 620' },
@@ -113,8 +121,13 @@ export default function App() {
   const room = rooms.find(r => r.id === activeRoom) || rooms[0];
 
   const addToRoom = useCallback((item) => {
+    const isSqm = PER_SQM_SKUS.has(item.sku);
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
+      // Per-m² panels always get a new row (each panel may have different dimensions)
+      if (isSqm) {
+        return { ...r, items: [...r.items, { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '' }] };
+      }
       const existing = r.items.find(x => x.sku === item.sku);
       if (existing) {
         return { ...r, items: r.items.map(x => x.sku === item.sku ? { ...x, qty: x.qty + 1 } : x) };
@@ -139,12 +152,24 @@ export default function App() {
     }));
   }, [activeRoom]);
 
-  const updateQty = (sku, qty) => {
+  const updateQty = (itemId, qty, isSqmItem = false) => {
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
+      if (isSqmItem) {
+        return qty <= 0
+          ? { ...r, items: r.items.filter(x => x.id !== itemId) }
+          : { ...r, items: r.items.map(x => x.id === itemId ? { ...x, qty } : x) };
+      }
       return qty <= 0
-        ? { ...r, items: r.items.filter(x => x.sku !== sku) }
-        : { ...r, items: r.items.map(x => x.sku === sku ? { ...x, qty } : x) };
+        ? { ...r, items: r.items.filter(x => x.sku !== itemId) }
+        : { ...r, items: r.items.map(x => x.sku === itemId ? { ...x, qty } : x) };
+    }));
+  };
+
+  const updatePanelDims = (itemId, field, value) => {
+    setRooms(rs => rs.map(r => {
+      if (r.id !== activeRoom) return r;
+      return { ...r, items: r.items.map(x => x.id === itemId ? { ...x, [field]: value } : x) };
     }));
   };
 
@@ -180,9 +205,23 @@ export default function App() {
     setRooms(rs => rs.map(r => r.id === id ? { ...r, name } : r));
   };
 
+  /* ── Helpers for per-m² items ── */
+  const calcSqm = (item) => {
+    const w = parseFloat(item.panelW) || 0;
+    const h = parseFloat(item.panelH) || 0;
+    return (w * h) / 1000000; // mm × mm → m²
+  };
+  const itemTotal = (item) => {
+    if (item.isSqm) {
+      const sqm = calcSqm(item);
+      return Math.round(item.prices[pg] * sqm * item.qty);
+    }
+    return item.prices[pg] * item.qty;
+  };
+
   /* ── Totals ── */
   const roomTotal = (r) => {
-    const itemsTotal = (r.items || []).reduce((s, i) => s + i.prices[pg] * i.qty, 0);
+    const itemsTotal = (r.items || []).reduce((s, i) => s + itemTotal(i), 0);
     const scTotal = (r.specialItems || []).reduce((s, i) => s + i.points * i.qty, 0);
     return itemsTotal + scTotal;
   };
@@ -211,7 +250,12 @@ export default function App() {
     ${rooms.map(r => `
       <h2>${r.name}</h2>
       <table><tr><th>SKU</th><th>Type</th><th>Line</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>${showCost ? '<th class="r">Cost</th>' : ''}</tr>
-      ${(r.items || []).map(i => `<tr><td>${i.sku}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.prices[pg])}</td><td class="r">${fmtPts(i.prices[pg] * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.prices[pg] * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
+      ${(r.items || []).map(i => {
+        const tot = i.isSqm ? Math.round(i.prices[pg] * ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) * i.qty) : i.prices[pg] * i.qty;
+        const sqmNote = i.isSqm ? ` <span style="color:#4a6fa5;font-size:11px">[${((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000).toFixed(4)} m²]</span>` : '';
+        const unitLabel = i.isSqm ? `${fmtPts(i.prices[pg])}/m²` : fmtPts(i.prices[pg]);
+        return `<tr><td>${i.sku}${sqmNote}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${unitLabel}</td><td class="r">${fmtPts(tot)}</td>${showCost ? `<td class="r">${fmtCost(tot, cf / 100)}</td>` : ''}</tr>`;
+      }).join('')}
       ${(r.specialItems || []).map(i => `<tr><td>${i.code}${i.customSize ? ` <span style="color:#4a6fa5;font-size:11px">[${i.customSize}mm]</span>` : ''}</td><td>Special Construction</td><td>${i.section || '—'}</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.points)}</td><td class="r">${fmtPts(i.points * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.points * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
       <tr class="total"><td colspan="5">Room Total</td><td class="r">${fmtPts(roomTotal(r))}</td>${showCost ? `<td class="r">${fmtCost(roomTotal(r), cf / 100)}</td>` : ''}</tr>
       </table>
@@ -351,10 +395,12 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.gold }}>{fmtPts(item.prices[pg])}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.gold }}>
+                        {fmtPts(item.prices[pg])}{PER_SQM_SKUS.has(item.sku) ? '/m²' : ''}
+                      </div>
                       {showCost && (
                         <div style={{ fontSize: 11, color: C.success, marginTop: 2 }}>
-                          {fmtCost(item.prices[pg], cf / 100)}
+                          {fmtCost(item.prices[pg], cf / 100)}{PER_SQM_SKUS.has(item.sku) ? '/m²' : ''}
                         </div>
                       )}
                     </div>
@@ -428,26 +474,66 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(room.items || []).map(item => (
-                    <tr key={item.sku} style={{ borderBottom: `1px solid ${C.borderLight}` }}>
+                  {(room.items || []).map(item => {
+                    const key = item.isSqm ? item.id : item.sku;
+                    const qtyId = item.isSqm ? item.id : item.sku;
+                    const sqm = item.isSqm ? calcSqm(item) : 0;
+                    const total = itemTotal(item);
+                    return (
+                    <React.Fragment key={key}>
+                    <tr style={{ borderBottom: item.isSqm ? 'none' : `1px solid ${C.borderLight}` }}>
                       <td style={{ padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{item.sku}</td>
-                      <td style={{ padding: '8px 0', fontSize: 12, color: C.textSec }}>{item.catLabel} · {item.line}</td>
+                      <td style={{ padding: '8px 0', fontSize: 12, color: C.textSec }}>
+                        {item.catLabel} · {item.line}
+                        {item.isSqm && <span style={{ color: C.accent, fontWeight: 600 }}> · per m²</span>}
+                      </td>
                       <td style={{ textAlign: 'center', padding: '8px 0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(item.sku, item.qty - 1)}>−</button>
+                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(qtyId, item.qty - 1, item.isSqm)}>−</button>
                           <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: 'center' }}>{item.qty}</span>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(item.sku, item.qty + 1)}>+</button>
+                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(qtyId, item.qty + 1, item.isSqm)}>+</button>
                         </div>
                       </td>
-                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>{fmtPts(item.prices[pg])}</td>
-                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(item.prices[pg] * item.qty)}</td>
-                      {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(item.prices[pg] * item.qty, cf / 100)}</td>}
+                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>
+                        {item.isSqm ? `${fmtPts(item.prices[pg])}/m²` : fmtPts(item.prices[pg])}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(total)}</td>
+                      {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(total, cf / 100)}</td>}
                       <td>
                         <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 14 }}
-                          onClick={() => updateQty(item.sku, 0)}>×</button>
+                          onClick={() => updateQty(qtyId, 0, item.isSqm)}>×</button>
                       </td>
                     </tr>
-                  ))}
+                    {item.isSqm && (
+                      <tr style={{ borderBottom: `1px solid ${C.borderLight}` }}>
+                        <td colSpan={showCost ? 7 : 6} style={{ padding: '0 0 8px 0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>Dimensions:</span>
+                            <input
+                              style={{ ...s.input, width: 80, fontSize: 12, padding: '4px 8px', borderColor: item.panelW ? C.accent : C.border }}
+                              placeholder="Width mm"
+                              value={item.panelW || ''}
+                              onChange={e => updatePanelDims(item.id, 'panelW', e.target.value)}
+                            />
+                            <span style={{ fontSize: 12, color: C.textSec }}>×</span>
+                            <input
+                              style={{ ...s.input, width: 80, fontSize: 12, padding: '4px 8px', borderColor: item.panelH ? C.accent : C.border }}
+                              placeholder="Height mm"
+                              value={item.panelH || ''}
+                              onChange={e => updatePanelDims(item.id, 'panelH', e.target.value)}
+                            />
+                            {sqm > 0 ? (
+                              <span style={{ fontSize: 11, color: C.success, fontWeight: 600 }}>{sqm.toFixed(4)} m²</span>
+                            ) : (
+                              <span style={{ fontSize: 10, color: C.danger }}>Enter panel dimensions</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
+                    );
+                  })}
                   {(room.specialItems || []).map(item => {
                     const dimInfo = DIMENSION_SC[item.code];
                     return (
