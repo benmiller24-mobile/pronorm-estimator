@@ -4,6 +4,8 @@ import {
   CATEGORY_GROUPS, LINES, PG_NAMES, PG_MULTIPLIERS,
   parseData, parseSpecialConstructions,
 } from './data.js';
+import { useAuth } from './AuthContext.jsx';
+import { useAutoSave } from './useAutoSave.js';
 
 /* ── Theme ── */
 const C = {
@@ -72,23 +74,42 @@ const fmtPts = n => n.toLocaleString() + ' pts';
 const fmtCost = (pts, cf) => '$' + (pts * cf).toFixed(2);
 
 /* ── Main App ── */
-export default function App() {
+export default function App({ order, onBack }) {
+  const { user, profile, signOut } = useAuth();
+  const orderId = order?.id;
+
+  // Initialize state from saved order data or defaults
+  const initRooms = order?.rooms && Array.isArray(order.rooms) && order.rooms.length > 0
+    ? order.rooms
+    : [{ id: Date.now(), name: 'Kitchen', items: [] }];
+
   const [items, setItems] = useState([]);
   const [specialItems, setSpecialItems] = useState([]);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('all');
   const [lineFilter, setLineFilter] = useState('all');
-  const [pg, setPg] = useState(3); // PG 3 = base
-  const [cfInput, setCfInput] = useState('');
-  const [cf, setCf] = useState(35);
-  const [projectName, setProjectName] = useState('New Kitchen Project');
-  const [rooms, setRooms] = useState([{ id: 1, name: 'Kitchen', items: [] }]);
-  const [activeRoom, setActiveRoom] = useState(1);
-  const [showCost, setShowCost] = useState(false);
+  const [pg, setPg] = useState(order?.pg ?? 3);
+  const [cfInput, setCfInput] = useState(order?.cf ? String(order.cf) : '');
+  const [cf, setCf] = useState(order?.cf ?? 35);
+  const [projectName, setProjectName] = useState(order?.project_name || 'New Kitchen Project');
+  const [rooms, setRooms] = useState(initRooms);
+  const [activeRoom, setActiveRoom] = useState(initRooms[0]?.id || 1);
+  const [showCost, setShowCost] = useState(order?.show_cost ?? false);
   const [showSpecial, setShowSpecial] = useState(false);
   const [scSearch, setScSearch] = useState('');
-  const [selectedItemId, setSelectedItemId] = useState(null); // which cabinet is selected for SC attachment
+  const [selectedItemId, setSelectedItemId] = useState(null);
   const listRef = useRef(null);
+
+  // Auto-save hook
+  const { save, saveStatus, lastSaved } = useAutoSave(user?.id, orderId);
+
+  // Trigger auto-save whenever order-relevant state changes
+  const saveVersion = useRef(0);
+  useEffect(() => {
+    // Skip initial mount
+    if (saveVersion.current === 0) { saveVersion.current = 1; return; }
+    save({ projectName, rooms, pg, cf, showCost });
+  }, [projectName, rooms, pg, cf, showCost, save]);
 
   useEffect(() => {
     setItems(parseData(RAW_DATA));
@@ -511,11 +532,23 @@ export default function App() {
       <div style={s.main}>
         {/* Top bar */}
         <div style={s.header}>
+          {onBack && (
+            <button style={{ ...s.btn, marginRight: 4 }} onClick={onBack}>← Orders</button>
+          )}
           <input style={{ ...s.input, fontFamily: SERIF, fontSize: 18, fontWeight: 400, border: 'none', padding: '4px 0', flex: 1 }}
             value={projectName} onChange={e => setProjectName(e.target.value)} />
+          {/* Save status indicator */}
+          <div style={{ fontSize: 11, color: saveStatus === 'error' ? C.danger : saveStatus === 'saving' ? C.accent : saveStatus === 'saved' ? C.success : C.textTer, marginRight: 8 }}>
+            {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? 'Save error' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString()}` : ''}
+          </div>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.gold }}>
             {fmtPts(grandTotal)}
             {showCost && <span style={{ color: C.success, marginLeft: 8 }}>{fmtCost(grandTotal, cf / 100)}</span>}
+          </div>
+          {/* User info + sign out */}
+          <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: C.textSec }}>{profile?.company_name || profile?.email}</span>
+            <button style={{ ...s.btn, fontSize: 10, padding: '4px 8px' }} onClick={signOut}>Sign Out</button>
           </div>
         </div>
 
