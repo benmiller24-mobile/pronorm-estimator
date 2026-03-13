@@ -15,7 +15,21 @@ const C = {
 const FONT = "'DM Sans',system-ui,sans-serif";
 const SERIF = "'Cormorant Garamond','Georgia',serif";
 
-/* ── Per-m² panel SKUs (priced per square metre — need W×H input) ── */
+/* ── Panel material finishes (columns in price book, NOT price groups) ── */
+const PANEL_MATERIALS = [
+  { idx: 0, code: 'N',     label: 'N – Laminate' },
+  { idx: 1, code: 'K',     label: 'K – Acrylic' },
+  { idx: 2, code: 'KS',    label: 'KS – Acrylic Special' },
+  { idx: 3, code: 'LU/F1', label: 'LU/F1 – Lacquer/Foil' },
+  { idx: 4, code: 'L',     label: 'L – Lacquer' },
+  { idx: 5, code: 'H',     label: 'H – High Gloss' },
+  { idx: 6, code: 'H1',    label: 'H1 – High Gloss 1' },
+  { idx: 7, code: 'H2/B',  label: 'H2/B – High Gloss 2' },
+  { idx: 8, code: 'F',     label: 'F – Veneer' },
+  { idx: 9, code: 'FE',    label: 'FE – Real Wood' },
+];
+
+/* ── Per-m² panel SKUs (priced per square metre — need W×H input + material) ── */
 const PER_SQM_SKUS = new Set([
   'ST 10-00-02','ST 16-00-02','ST 25-00-02','ST 50-00-02',
   'WS 10-00-02','WS 16-00-02','WS 25-00-02','WS 50-00-02',
@@ -126,7 +140,9 @@ export default function App() {
       if (r.id !== activeRoom) return r;
       // Per-m² panels always get a new row (each panel may have different dimensions)
       if (isSqm) {
-        return { ...r, items: [...r.items, { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '' }] };
+        // Default material to first available (non-zero price)
+        const defaultMat = item.prices.findIndex(p => p > 0);
+        return { ...r, items: [...r.items, { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '', panelMaterial: defaultMat >= 0 ? defaultMat : 0 }] };
       }
       const existing = r.items.find(x => x.sku === item.sku);
       if (existing) {
@@ -214,7 +230,9 @@ export default function App() {
   const itemTotal = (item) => {
     if (item.isSqm) {
       const sqm = calcSqm(item);
-      return Math.round(item.prices[pg] * sqm * item.qty);
+      const matIdx = item.panelMaterial ?? 0;
+      const pricePerSqm = item.prices[matIdx] || 0;
+      return Math.round(pricePerSqm * sqm * item.qty);
     }
     return item.prices[pg] * item.qty;
   };
@@ -251,9 +269,13 @@ export default function App() {
       <h2>${r.name}</h2>
       <table><tr><th>SKU</th><th>Type</th><th>Line</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>${showCost ? '<th class="r">Cost</th>' : ''}</tr>
       ${(r.items || []).map(i => {
-        const tot = i.isSqm ? Math.round(i.prices[pg] * ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) * i.qty) : i.prices[pg] * i.qty;
-        const sqmNote = i.isSqm ? ` <span style="color:#4a6fa5;font-size:11px">[${((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000).toFixed(4)} m²]</span>` : '';
-        const unitLabel = i.isSqm ? `${fmtPts(i.prices[pg])}/m²` : fmtPts(i.prices[pg]);
+        const matIdx = i.panelMaterial ?? 0;
+        const matPr = i.isSqm ? (i.prices[matIdx] || 0) : 0;
+        const sqmVal = i.isSqm ? ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) : 0;
+        const tot = i.isSqm ? Math.round(matPr * sqmVal * i.qty) : i.prices[pg] * i.qty;
+        const matName = i.isSqm ? (PANEL_MATERIALS.find(m=>m.idx===matIdx)||{}).code||'' : '';
+        const sqmNote = i.isSqm ? ` <span style="color:#4a6fa5;font-size:11px">[${matName} · ${sqmVal.toFixed(4)} m²]</span>` : '';
+        const unitLabel = i.isSqm ? `${fmtPts(matPr)}/m²` : fmtPts(i.prices[pg]);
         return `<tr><td>${i.sku}${sqmNote}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${unitLabel}</td><td class="r">${fmtPts(tot)}</td>${showCost ? `<td class="r">${fmtCost(tot, cf / 100)}</td>` : ''}</tr>`;
       }).join('')}
       ${(r.specialItems || []).map(i => `<tr><td>${i.code}${i.customSize ? ` <span style="color:#4a6fa5;font-size:11px">[${i.customSize}mm]</span>` : ''}</td><td>Special Construction</td><td>${i.section || '—'}</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.points)}</td><td class="r">${fmtPts(i.points * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.points * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
@@ -395,13 +417,22 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.gold }}>
-                        {fmtPts(item.prices[pg])}{PER_SQM_SKUS.has(item.sku) ? '/m²' : ''}
-                      </div>
-                      {showCost && (
-                        <div style={{ fontSize: 11, color: C.success, marginTop: 2 }}>
-                          {fmtCost(item.prices[pg], cf / 100)}{PER_SQM_SKUS.has(item.sku) ? '/m²' : ''}
-                        </div>
+                      {PER_SQM_SKUS.has(item.sku) ? (
+                        <>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: C.gold }}>per m²</div>
+                          <div style={{ fontSize: 10, color: C.textSec, marginTop: 1 }}>
+                            {PANEL_MATERIALS.filter(m => item.prices[m.idx] > 0).map(m => `${m.code}: ${item.prices[m.idx]}`).join(' · ')}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: C.gold }}>{fmtPts(item.prices[pg])}</div>
+                          {showCost && (
+                            <div style={{ fontSize: 11, color: C.success, marginTop: 2 }}>
+                              {fmtCost(item.prices[pg], cf / 100)}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -479,6 +510,9 @@ export default function App() {
                     const qtyId = item.isSqm ? item.id : item.sku;
                     const sqm = item.isSqm ? calcSqm(item) : 0;
                     const total = itemTotal(item);
+                    const matIdx = item.panelMaterial ?? 0;
+                    const matPrice = item.isSqm ? (item.prices[matIdx] || 0) : 0;
+                    const availMats = item.isSqm ? PANEL_MATERIALS.filter(m => item.prices[m.idx] > 0) : [];
                     return (
                     <React.Fragment key={key}>
                     <tr style={{ borderBottom: item.isSqm ? 'none' : `1px solid ${C.borderLight}` }}>
@@ -495,7 +529,7 @@ export default function App() {
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>
-                        {item.isSqm ? `${fmtPts(item.prices[pg])}/m²` : fmtPts(item.prices[pg])}
+                        {item.isSqm ? `${fmtPts(matPrice)}/m²` : fmtPts(item.prices[pg])}
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(total)}</td>
                       {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(total, cf / 100)}</td>}
@@ -506,26 +540,36 @@ export default function App() {
                     </tr>
                     {item.isSqm && (
                       <tr style={{ borderBottom: `1px solid ${C.borderLight}` }}>
-                        <td colSpan={showCost ? 7 : 6} style={{ padding: '0 0 8px 0' }}>
+                        <td colSpan={showCost ? 7 : 6} style={{ padding: '2px 0 8px 0' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>Dimensions:</span>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>Material:</span>
+                            <select
+                              style={{ ...s.select, fontSize: 11, padding: '3px 24px 3px 6px', minWidth: 150 }}
+                              value={matIdx}
+                              onChange={e => updatePanelDims(item.id, 'panelMaterial', parseInt(e.target.value))}
+                            >
+                              {availMats.map(m => (
+                                <option key={m.idx} value={m.idx}>{m.label} ({fmtPts(item.prices[m.idx])}/m²)</option>
+                              ))}
+                            </select>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600, marginLeft: 4 }}>Size:</span>
                             <input
-                              style={{ ...s.input, width: 80, fontSize: 12, padding: '4px 8px', borderColor: item.panelW ? C.accent : C.border }}
-                              placeholder="Width mm"
+                              style={{ ...s.input, width: 72, fontSize: 12, padding: '3px 6px', borderColor: item.panelW ? C.accent : C.border }}
+                              placeholder="W mm"
                               value={item.panelW || ''}
                               onChange={e => updatePanelDims(item.id, 'panelW', e.target.value)}
                             />
                             <span style={{ fontSize: 12, color: C.textSec }}>×</span>
                             <input
-                              style={{ ...s.input, width: 80, fontSize: 12, padding: '4px 8px', borderColor: item.panelH ? C.accent : C.border }}
-                              placeholder="Height mm"
+                              style={{ ...s.input, width: 72, fontSize: 12, padding: '3px 6px', borderColor: item.panelH ? C.accent : C.border }}
+                              placeholder="H mm"
                               value={item.panelH || ''}
                               onChange={e => updatePanelDims(item.id, 'panelH', e.target.value)}
                             />
                             {sqm > 0 ? (
                               <span style={{ fontSize: 11, color: C.success, fontWeight: 600 }}>{sqm.toFixed(4)} m²</span>
                             ) : (
-                              <span style={{ fontSize: 10, color: C.danger }}>Enter panel dimensions</span>
+                              <span style={{ fontSize: 10, color: C.danger }}>Enter dimensions</span>
                             )}
                           </div>
                         </td>
