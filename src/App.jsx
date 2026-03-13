@@ -15,6 +15,36 @@ const C = {
 const FONT = "'DM Sans',system-ui,sans-serif";
 const SERIF = "'Cormorant Garamond','Georgia',serif";
 
+/* ── Dimension-based special construction codes ── */
+const DIMENSION_SC = {
+  'X-01-H':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 620' },
+  'X-01-O':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 620' },
+  'X-01-U':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 520' },
+  'X-01-HFX':{ dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 620' },
+  'X-06-H':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 370' },
+  'X-06-O':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 370' },
+  'X-06-U':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 270' },
+  'X-02-H':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 620' },
+  'X-02-O':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 620' },
+  'X-02-U':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 520' },
+  'X-07-H':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 370' },
+  'X-07-U':  { dim: 'depth', label: 'Depth (mm)', placeholder: 'e.g. 270' },
+  'X-03-H':  { dim: 'width', label: 'Width (mm)', placeholder: 'e.g. 450' },
+  'X-03-O':  { dim: 'width', label: 'Width (mm)', placeholder: 'e.g. 450' },
+  'X-03-U':  { dim: 'width', label: 'Width (mm)', placeholder: 'e.g. 350' },
+  'X-15-U':  { dim: 'width', label: 'Width (mm)', placeholder: 'e.g. 350' },
+  'X-04-H':  { dim: 'height', label: 'Height (mm)', placeholder: 'e.g. 780' },
+  'X-04-O':  { dim: 'height', label: 'Height (mm)', placeholder: 'e.g. 780' },
+  'X-04-U':  { dim: 'height', label: 'Height (mm)', placeholder: 'e.g. 680' },
+  'X-35-FV': { dim: 'front', label: 'Front size (mm)', placeholder: 'e.g. 600' },
+  'X-35-FV2204':{ dim: 'front', label: 'Front size (mm)', placeholder: 'e.g. 600' },
+  'X-35-FVO':{ dim: 'front', label: 'Front size (mm)', placeholder: 'e.g. 600' },
+  'X-35-FWV':{ dim: 'front', label: 'Front size (mm)', placeholder: 'e.g. 600' },
+  'X-35-F':  { dim: 'front', label: 'Front size (mm)', placeholder: 'e.g. 600' },
+  'X-13-O':  { dim: 'side', label: 'Side dim (mm)', placeholder: 'e.g. 400' },
+  'X-12-O':  { dim: 'front', label: 'Front dim (mm)', placeholder: 'e.g. 400' },
+};
+
 /* ── Format helpers ── */
 const fmtPts = n => n.toLocaleString() + ' pts';
 const fmtCost = (pts, cf) => '$' + (pts * cf).toFixed(2);
@@ -94,8 +124,13 @@ export default function App() {
   }, [activeRoom]);
 
   const addSCToRoom = useCallback((sc) => {
+    const isDimensionBased = !!DIMENSION_SC[sc.code];
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
+      // Dimension-based SCs always get a new row (each may have different custom size)
+      if (isDimensionBased) {
+        return { ...r, specialItems: [...(r.specialItems || []), { ...sc, qty: 1, customSize: '', id: Date.now() + Math.random() }] };
+      }
       const existing = (r.specialItems || []).find(x => x.code === sc.code);
       if (existing) {
         return { ...r, specialItems: (r.specialItems || []).map(x => x.code === sc.code ? { ...x, qty: x.qty + 1 } : x) };
@@ -113,12 +148,19 @@ export default function App() {
     }));
   };
 
-  const updateSCQty = (code, qty) => {
+  const updateSCQty = (itemId, qty) => {
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
       return qty <= 0
-        ? { ...r, specialItems: (r.specialItems || []).filter(x => x.code !== code) }
-        : { ...r, specialItems: (r.specialItems || []).map(x => x.code === code ? { ...x, qty } : x) };
+        ? { ...r, specialItems: (r.specialItems || []).filter(x => x.id !== itemId) }
+        : { ...r, specialItems: (r.specialItems || []).map(x => x.id === itemId ? { ...x, qty } : x) };
+    }));
+  };
+
+  const updateSCCustomSize = (itemId, customSize) => {
+    setRooms(rs => rs.map(r => {
+      if (r.id !== activeRoom) return r;
+      return { ...r, specialItems: (r.specialItems || []).map(x => x.id === itemId ? { ...x, customSize } : x) };
     }));
   };
 
@@ -170,7 +212,7 @@ export default function App() {
       <h2>${r.name}</h2>
       <table><tr><th>SKU</th><th>Type</th><th>Line</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>${showCost ? '<th class="r">Cost</th>' : ''}</tr>
       ${(r.items || []).map(i => `<tr><td>${i.sku}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.prices[pg])}</td><td class="r">${fmtPts(i.prices[pg] * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.prices[pg] * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
-      ${(r.specialItems || []).map(i => `<tr><td>${i.code}</td><td>Special Construction</td><td>—</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.points)}</td><td class="r">${fmtPts(i.points * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.points * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
+      ${(r.specialItems || []).map(i => `<tr><td>${i.code}${i.customSize ? ` <span style="color:#4a6fa5;font-size:11px">[${i.customSize}mm]</span>` : ''}</td><td>Special Construction</td><td>${i.section || '—'}</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.points)}</td><td class="r">${fmtPts(i.points * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.points * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
       <tr class="total"><td colspan="5">Room Total</td><td class="r">${fmtPts(roomTotal(r))}</td>${showCost ? `<td class="r">${fmtCost(roomTotal(r), cf / 100)}</td>` : ''}</tr>
       </table>
     `).join('')}
@@ -406,15 +448,18 @@ export default function App() {
                       </td>
                     </tr>
                   ))}
-                  {(room.specialItems || []).map(item => (
-                    <tr key={item.code} style={{ borderBottom: `1px solid ${C.borderLight}`, background: 'rgba(74,111,165,0.04)' }}>
+                  {(room.specialItems || []).map(item => {
+                    const dimInfo = DIMENSION_SC[item.code];
+                    return (
+                    <React.Fragment key={item.id}>
+                    <tr style={{ borderBottom: dimInfo ? 'none' : `1px solid ${C.borderLight}`, background: 'rgba(74,111,165,0.04)' }}>
                       <td style={{ padding: '8px 0', fontSize: 13, fontWeight: 600, color: C.accent }}>{item.code}</td>
                       <td style={{ padding: '8px 0', fontSize: 12, color: C.textSec }}>Special · {item.section}</td>
                       <td style={{ textAlign: 'center', padding: '8px 0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateSCQty(item.code, item.qty - 1)}>−</button>
+                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateSCQty(item.id, item.qty - 1)}>−</button>
                           <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: 'center' }}>{item.qty}</span>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateSCQty(item.code, item.qty + 1)}>+</button>
+                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateSCQty(item.id, item.qty + 1)}>+</button>
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>{fmtPts(item.points)}</td>
@@ -422,10 +467,28 @@ export default function App() {
                       {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(item.points * item.qty, cf / 100)}</td>}
                       <td>
                         <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 14 }}
-                          onClick={() => updateSCQty(item.code, 0)}>×</button>
+                          onClick={() => updateSCQty(item.id, 0)}>×</button>
                       </td>
                     </tr>
-                  ))}
+                    {dimInfo && (
+                      <tr style={{ borderBottom: `1px solid ${C.borderLight}`, background: 'rgba(74,111,165,0.04)' }}>
+                        <td colSpan={showCost ? 7 : 6} style={{ padding: '0 0 8px 0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>{dimInfo.label}:</span>
+                            <input
+                              style={{ ...s.input, width: 100, fontSize: 12, padding: '4px 8px', borderColor: item.customSize ? C.accent : C.border }}
+                              placeholder={dimInfo.placeholder}
+                              value={item.customSize || ''}
+                              onChange={e => updateSCCustomSize(item.id, e.target.value)}
+                            />
+                            {!item.customSize && <span style={{ fontSize: 10, color: C.danger }}>Enter custom size</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
 
