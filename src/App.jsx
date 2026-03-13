@@ -82,11 +82,12 @@ export default function App() {
   const [cfInput, setCfInput] = useState('');
   const [cf, setCf] = useState(35);
   const [projectName, setProjectName] = useState('New Kitchen Project');
-  const [rooms, setRooms] = useState([{ id: 1, name: 'Kitchen', items: [], specialItems: [] }]);
+  const [rooms, setRooms] = useState([{ id: 1, name: 'Kitchen', items: [] }]);
   const [activeRoom, setActiveRoom] = useState(1);
   const [showCost, setShowCost] = useState(false);
   const [showSpecial, setShowSpecial] = useState(false);
   const [scSearch, setScSearch] = useState('');
+  const [selectedItemId, setSelectedItemId] = useState(null); // which cabinet is selected for SC attachment
   const listRef = useRef(null);
 
   useEffect(() => {
@@ -138,47 +139,63 @@ export default function App() {
     const isSqm = PER_SQM_SKUS.has(item.sku);
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
-      // Per-m² panels always get a new row (each panel may have different dimensions)
       if (isSqm) {
-        // Default material to first available (non-zero price)
         const defaultMat = item.prices.findIndex(p => p > 0);
-        return { ...r, items: [...r.items, { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '', panelMaterial: defaultMat >= 0 ? defaultMat : 0 }] };
+        const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '', panelMaterial: defaultMat >= 0 ? defaultMat : 0, attachedSCs: [] };
+        return { ...r, items: [...r.items, newItem] };
       }
-      const existing = r.items.find(x => x.sku === item.sku);
+      const existing = r.items.find(x => x.sku === item.sku && !x.isSqm);
       if (existing) {
-        return { ...r, items: r.items.map(x => x.sku === item.sku ? { ...x, qty: x.qty + 1 } : x) };
+        return { ...r, items: r.items.map(x => x.sku === item.sku && !x.isSqm ? { ...x, qty: x.qty + 1 } : x) };
       }
-      return { ...r, items: [...r.items, { ...item, qty: 1, id: Date.now() + Math.random() }] };
+      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [] };
+      setSelectedItemId(newItem.id);
+      return { ...r, items: [...r.items, newItem] };
     }));
   }, [activeRoom]);
 
+  /* ── Attach SC to selected cabinet item ── */
   const addSCToRoom = useCallback((sc) => {
+    if (!selectedItemId) return; // no item selected
     const isDimensionBased = !!DIMENSION_SC[sc.code];
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
-      // Dimension-based SCs always get a new row (each may have different custom size)
-      if (isDimensionBased) {
-        return { ...r, specialItems: [...(r.specialItems || []), { ...sc, qty: 1, customSize: '', id: Date.now() + Math.random() }] };
-      }
-      const existing = (r.specialItems || []).find(x => x.code === sc.code);
-      if (existing) {
-        return { ...r, specialItems: (r.specialItems || []).map(x => x.code === sc.code ? { ...x, qty: x.qty + 1 } : x) };
-      }
-      return { ...r, specialItems: [...(r.specialItems || []), { ...sc, qty: 1, id: Date.now() + Math.random() }] };
+      return {
+        ...r,
+        items: r.items.map(item => {
+          if (item.id !== selectedItemId) return item;
+          const scs = item.attachedSCs || [];
+          // Dimension-based SCs always get a new row
+          if (isDimensionBased) {
+            return { ...item, attachedSCs: [...scs, { ...sc, qty: 1, customSize: '', id: Date.now() + Math.random() }] };
+          }
+          // Otherwise increment qty if already attached
+          const existing = scs.find(x => x.code === sc.code);
+          if (existing) {
+            return { ...item, attachedSCs: scs.map(x => x.code === sc.code ? { ...x, qty: x.qty + 1 } : x) };
+          }
+          return { ...item, attachedSCs: [...scs, { ...sc, qty: 1, id: Date.now() + Math.random() }] };
+        }),
+      };
     }));
-  }, [activeRoom]);
+  }, [activeRoom, selectedItemId]);
 
   const updateQty = (itemId, qty, isSqmItem = false) => {
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
       if (isSqmItem) {
-        return qty <= 0
-          ? { ...r, items: r.items.filter(x => x.id !== itemId) }
-          : { ...r, items: r.items.map(x => x.id === itemId ? { ...x, qty } : x) };
+        if (qty <= 0) {
+          if (selectedItemId === itemId) setSelectedItemId(null);
+          return { ...r, items: r.items.filter(x => x.id !== itemId) };
+        }
+        return { ...r, items: r.items.map(x => x.id === itemId ? { ...x, qty } : x) };
       }
-      return qty <= 0
-        ? { ...r, items: r.items.filter(x => x.sku !== itemId) }
-        : { ...r, items: r.items.map(x => x.sku === itemId ? { ...x, qty } : x) };
+      if (qty <= 0) {
+        const removing = r.items.find(x => x.id === itemId || x.sku === itemId);
+        if (removing && selectedItemId === removing.id) setSelectedItemId(null);
+        return { ...r, items: r.items.filter(x => x.id !== itemId && x.sku !== itemId) };
+      }
+      return { ...r, items: r.items.map(x => (x.id === itemId || x.sku === itemId) ? { ...x, qty } : x) };
     }));
   };
 
@@ -189,32 +206,50 @@ export default function App() {
     }));
   };
 
-  const updateSCQty = (itemId, qty) => {
+  /* ── SC quantity and custom size on attached SCs ── */
+  const updateAttachedSCQty = (parentItemId, scId, qty) => {
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
-      return qty <= 0
-        ? { ...r, specialItems: (r.specialItems || []).filter(x => x.id !== itemId) }
-        : { ...r, specialItems: (r.specialItems || []).map(x => x.id === itemId ? { ...x, qty } : x) };
+      return {
+        ...r,
+        items: r.items.map(item => {
+          if (item.id !== parentItemId) return item;
+          if (qty <= 0) {
+            return { ...item, attachedSCs: (item.attachedSCs || []).filter(x => x.id !== scId) };
+          }
+          return { ...item, attachedSCs: (item.attachedSCs || []).map(x => x.id === scId ? { ...x, qty } : x) };
+        }),
+      };
     }));
   };
 
-  const updateSCCustomSize = (itemId, customSize) => {
+  const updateAttachedSCCustomSize = (parentItemId, scId, customSize) => {
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
-      return { ...r, specialItems: (r.specialItems || []).map(x => x.id === itemId ? { ...x, customSize } : x) };
+      return {
+        ...r,
+        items: r.items.map(item => {
+          if (item.id !== parentItemId) return item;
+          return { ...item, attachedSCs: (item.attachedSCs || []).map(x => x.id === scId ? { ...x, customSize } : x) };
+        }),
+      };
     }));
   };
 
   const addRoom = () => {
     const id = Date.now();
-    setRooms(rs => [...rs, { id, name: `Room ${rs.length + 1}`, items: [], specialItems: [] }]);
+    setRooms(rs => [...rs, { id, name: `Room ${rs.length + 1}`, items: [] }]);
     setActiveRoom(id);
+    setSelectedItemId(null);
   };
 
   const removeRoom = (id) => {
     if (rooms.length <= 1) return;
     setRooms(rs => rs.filter(r => r.id !== id));
-    if (activeRoom === id) setActiveRoom(rooms.find(r => r.id !== id)?.id);
+    if (activeRoom === id) {
+      setActiveRoom(rooms.find(r => r.id !== id)?.id);
+      setSelectedItemId(null);
+    }
   };
 
   const renameRoom = (id, name) => {
@@ -225,9 +260,9 @@ export default function App() {
   const calcSqm = (item) => {
     const w = parseFloat(item.panelW) || 0;
     const h = parseFloat(item.panelH) || 0;
-    return (w * h) / 1000000; // mm × mm → m²
+    return (w * h) / 1000000;
   };
-  const itemTotal = (item) => {
+  const itemBaseTotal = (item) => {
     if (item.isSqm) {
       const sqm = calcSqm(item);
       const matIdx = item.panelMaterial ?? 0;
@@ -236,20 +271,26 @@ export default function App() {
     }
     return item.prices[pg] * item.qty;
   };
+  const itemSCTotal = (item) => {
+    return (item.attachedSCs || []).reduce((s, sc) => s + sc.points * sc.qty, 0);
+  };
+  const itemFullTotal = (item) => itemBaseTotal(item) + itemSCTotal(item);
 
   /* ── Totals ── */
-  const roomTotal = (r) => {
-    const itemsTotal = (r.items || []).reduce((s, i) => s + itemTotal(i), 0);
-    const scTotal = (r.specialItems || []).reduce((s, i) => s + i.points * i.qty, 0);
-    return itemsTotal + scTotal;
-  };
+  const roomTotal = (r) => (r.items || []).reduce((s, i) => s + itemFullTotal(i), 0);
   const roomItemCount = (r) => {
-    const itemsCount = (r.items || []).reduce((s, i) => s + i.qty, 0);
-    const scCount = (r.specialItems || []).reduce((s, i) => s + i.qty, 0);
-    return itemsCount + scCount;
+    let count = 0;
+    (r.items || []).forEach(i => {
+      count += i.qty;
+      (i.attachedSCs || []).forEach(sc => { count += sc.qty; });
+    });
+    return count;
   };
   const grandTotal = rooms.reduce((s, r) => s + roomTotal(r), 0);
   const grandCount = rooms.reduce((s, r) => s + roomItemCount(r), 0);
+
+  /* ── Get selected item info for SC panel ── */
+  const selectedItem = room.items.find(i => i.id === selectedItemId);
 
   /* ── PDF export ── */
   const exportPDF = () => {
@@ -262,6 +303,7 @@ export default function App() {
     th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #eceae6;font-size:13px}
     th{background:#f7f6f3;font-weight:600}
     .r{text-align:right}.footer{margin-top:30px;font-size:11px;color:#8a8580}
+    .sc{color:#4a6fa5;font-size:12px}
     .total{font-weight:700;font-size:15px;border-top:2px solid #191919}</style></head><body>
     <h1>${projectName}</h1>
     <div style="font-size:12px;color:#8a8580">PG: ${PG_NAMES[pg]} · ${new Date().toLocaleDateString()}</div>
@@ -272,13 +314,19 @@ export default function App() {
         const matIdx = i.panelMaterial ?? 0;
         const matPr = i.isSqm ? (i.prices[matIdx] || 0) : 0;
         const sqmVal = i.isSqm ? ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) : 0;
-        const tot = i.isSqm ? Math.round(matPr * sqmVal * i.qty) : i.prices[pg] * i.qty;
+        const baseTot = i.isSqm ? Math.round(matPr * sqmVal * i.qty) : i.prices[pg] * i.qty;
         const matName = i.isSqm ? (PANEL_MATERIALS.find(m=>m.idx===matIdx)||{}).code||'' : '';
         const sqmNote = i.isSqm ? ` <span style="color:#4a6fa5;font-size:11px">[${matName} · ${sqmVal.toFixed(4)} m²]</span>` : '';
         const unitLabel = i.isSqm ? `${fmtPts(matPr)}/m²` : fmtPts(i.prices[pg]);
-        return `<tr><td>${i.sku}${sqmNote}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${unitLabel}</td><td class="r">${fmtPts(tot)}</td>${showCost ? `<td class="r">${fmtCost(tot, cf / 100)}</td>` : ''}</tr>`;
+        let rows = `<tr><td>${i.sku}${sqmNote}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${unitLabel}</td><td class="r">${fmtPts(baseTot)}</td>${showCost ? `<td class="r">${fmtCost(baseTot, cf / 100)}</td>` : ''}</tr>`;
+        // Attached SCs
+        (i.attachedSCs || []).forEach(sc => {
+          const dimInfo = DIMENSION_SC[sc.code];
+          const sizeNote = sc.customSize ? ` [${sc.customSize}mm]` : '';
+          rows += `<tr class="sc"><td style="padding-left:24px">&nbsp;&nbsp;↳ ${sc.code}${sizeNote}</td><td>Special · ${sc.section||'—'}</td><td></td><td class="r">${sc.qty}</td><td class="r">${fmtPts(sc.points)}</td><td class="r">${fmtPts(sc.points * sc.qty)}</td>${showCost ? `<td class="r">${fmtCost(sc.points * sc.qty, cf / 100)}</td>` : ''}</tr>`;
+        });
+        return rows;
       }).join('')}
-      ${(r.specialItems || []).map(i => `<tr><td>${i.code}${i.customSize ? ` <span style="color:#4a6fa5;font-size:11px">[${i.customSize}mm]</span>` : ''}</td><td>Special Construction</td><td>${i.section || '—'}</td><td class="r">${i.qty}</td><td class="r">${fmtPts(i.points)}</td><td class="r">${fmtPts(i.points * i.qty)}</td>${showCost ? `<td class="r">${fmtCost(i.points * i.qty, cf / 100)}</td>` : ''}</tr>`).join('')}
       <tr class="total"><td colspan="5">Room Total</td><td class="r">${fmtPts(roomTotal(r))}</td>${showCost ? `<td class="r">${fmtCost(roomTotal(r), cf / 100)}</td>` : ''}</tr>
       </table>
     `).join('')}
@@ -367,6 +415,17 @@ export default function App() {
           </button>
         </div>
 
+        {/* SC attachment target indicator */}
+        {showSpecial && (
+          <div style={{ padding: '6px 16px', background: selectedItem ? 'rgba(74,111,165,0.08)' : 'rgba(194,64,64,0.06)', borderBottom: `1px solid ${C.border}`, fontSize: 12 }}>
+            {selectedItem ? (
+              <span><span style={{ fontWeight: 600, color: C.accent }}>Attaching to:</span> {selectedItem.sku} <span style={{ color: C.textSec }}>({selectedItem.catLabel})</span></span>
+            ) : (
+              <span style={{ color: C.danger, fontWeight: 600 }}>Select a cabinet in the room first</span>
+            )}
+          </div>
+        )}
+
         {/* Search */}
         <div style={s.searchWrap}>
           {showSpecial ? (
@@ -384,8 +443,8 @@ export default function App() {
             filteredSC.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: C.textTer, fontSize: 13 }}>No special constructions found</div>
             ) : filteredSC.map((sc, idx) => (
-              <div key={sc.code + idx} style={s.row}
-                onMouseEnter={e => e.currentTarget.style.background = C.goldMuted}
+              <div key={sc.code + idx} style={{ ...s.row, opacity: selectedItem ? 1 : 0.4 }}
+                onMouseEnter={e => { if (selectedItem) e.currentTarget.style.background = C.goldMuted; }}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 onClick={() => addSCToRoom(sc)}>
                 <div style={{ flex: 1 }}>
@@ -464,7 +523,7 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 24px', borderBottom: `1px solid ${C.border}`, background: C.card, flexWrap: 'wrap' }}>
           {rooms.map(r => (
             <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button style={s.tab(activeRoom === r.id)} onClick={() => setActiveRoom(r.id)}>
+              <button style={s.tab(activeRoom === r.id)} onClick={() => { setActiveRoom(r.id); setSelectedItemId(null); }}>
                 {r.name} ({roomItemCount(r)})
               </button>
               {rooms.length > 1 && (
@@ -485,7 +544,7 @@ export default function App() {
           </div>
 
           {/* Items */}
-          {(room.items.length === 0 && (!room.specialItems || room.specialItems.length === 0)) ? (
+          {room.items.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 48, color: C.textTer }}>
               <div style={{ fontSize: 14, marginBottom: 4 }}>Empty Room</div>
               <div style={{ fontSize: 12 }}>Click items in the catalog to add them here</div>
@@ -506,42 +565,60 @@ export default function App() {
                 </thead>
                 <tbody>
                   {(room.items || []).map(item => {
-                    const key = item.isSqm ? item.id : item.sku;
-                    const qtyId = item.isSqm ? item.id : item.sku;
+                    const isSelected = item.id === selectedItemId;
                     const sqm = item.isSqm ? calcSqm(item) : 0;
-                    const total = itemTotal(item);
+                    const baseTotal = itemBaseTotal(item);
+                    const scTotal = itemSCTotal(item);
+                    const fullTotal = baseTotal + scTotal;
                     const matIdx = item.panelMaterial ?? 0;
                     const matPrice = item.isSqm ? (item.prices[matIdx] || 0) : 0;
                     const availMats = item.isSqm ? PANEL_MATERIALS.filter(m => item.prices[m.idx] > 0) : [];
+                    const attachedSCs = item.attachedSCs || [];
+                    const selBorder = isSelected ? `2px solid ${C.accent}` : 'none';
+
                     return (
-                    <React.Fragment key={key}>
-                    <tr style={{ borderBottom: item.isSqm ? 'none' : `1px solid ${C.borderLight}` }}>
-                      <td style={{ padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{item.sku}</td>
+                    <React.Fragment key={item.id}>
+                    {/* ── Cabinet row (clickable to select) ── */}
+                    <tr
+                      style={{
+                        borderBottom: (item.isSqm || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`,
+                        background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent',
+                        cursor: 'pointer',
+                        borderLeft: selBorder,
+                      }}
+                      onClick={() => setSelectedItemId(isSelected ? null : item.id)}
+                    >
+                      <td style={{ padding: '8px 0 8px 4px', fontSize: 13, fontWeight: 600 }}>
+                        {item.sku}
+                        {isSelected && <span style={{ fontSize: 10, color: C.accent, marginLeft: 6 }}>SELECTED</span>}
+                      </td>
                       <td style={{ padding: '8px 0', fontSize: 12, color: C.textSec }}>
                         {item.catLabel} · {item.line}
                         {item.isSqm && <span style={{ color: C.accent, fontWeight: 600 }}> · per m²</span>}
                       </td>
-                      <td style={{ textAlign: 'center', padding: '8px 0' }}>
+                      <td style={{ textAlign: 'center', padding: '8px 0' }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(qtyId, item.qty - 1, item.isSqm)}>−</button>
+                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(item.id, item.qty - 1, item.isSqm)}>−</button>
                           <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: 'center' }}>{item.qty}</span>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(qtyId, item.qty + 1, item.isSqm)}>+</button>
+                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateQty(item.id, item.qty + 1, item.isSqm)}>+</button>
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>
                         {item.isSqm ? `${fmtPts(matPrice)}/m²` : fmtPts(item.prices[pg])}
                       </td>
-                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(total)}</td>
-                      {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(total, cf / 100)}</td>}
-                      <td>
+                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(fullTotal)}</td>
+                      {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(fullTotal, cf / 100)}</td>}
+                      <td onClick={e => e.stopPropagation()}>
                         <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 14 }}
-                          onClick={() => updateQty(qtyId, 0, item.isSqm)}>×</button>
+                          onClick={() => updateQty(item.id, 0, item.isSqm)}>×</button>
                       </td>
                     </tr>
+
+                    {/* ── Per-m² dimension inputs ── */}
                     {item.isSqm && (
-                      <tr style={{ borderBottom: `1px solid ${C.borderLight}` }}>
-                        <td colSpan={showCost ? 7 : 6} style={{ padding: '2px 0 8px 0' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4, flexWrap: 'wrap' }}>
+                      <tr style={{ borderBottom: attachedSCs.length > 0 ? 'none' : `1px solid ${C.borderLight}`, background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent', borderLeft: selBorder }}>
+                        <td colSpan={showCost ? 7 : 6} style={{ padding: '2px 0 8px 4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>Material:</span>
                             <select
                               style={{ ...s.select, fontSize: 11, padding: '3px 24px 3px 6px', minWidth: 150 }}
@@ -575,47 +652,60 @@ export default function App() {
                         </td>
                       </tr>
                     )}
-                    </React.Fragment>
-                    );
-                  })}
-                  {(room.specialItems || []).map(item => {
-                    const dimInfo = DIMENSION_SC[item.code];
-                    return (
-                    <React.Fragment key={item.id}>
-                    <tr style={{ borderBottom: dimInfo ? 'none' : `1px solid ${C.borderLight}`, background: 'rgba(74,111,165,0.04)' }}>
-                      <td style={{ padding: '8px 0', fontSize: 13, fontWeight: 600, color: C.accent }}>{item.code}</td>
-                      <td style={{ padding: '8px 0', fontSize: 12, color: C.textSec }}>Special · {item.section}</td>
-                      <td style={{ textAlign: 'center', padding: '8px 0' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateSCQty(item.id, item.qty - 1)}>−</button>
-                          <span style={{ fontSize: 13, fontWeight: 600, minWidth: 20, textAlign: 'center' }}>{item.qty}</span>
-                          <button style={{ ...s.btn, padding: '2px 8px', fontSize: 11 }} onClick={() => updateSCQty(item.id, item.qty + 1)}>+</button>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>{fmtPts(item.points)}</td>
-                      <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(item.points * item.qty)}</td>
-                      {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(item.points * item.qty, cf / 100)}</td>}
-                      <td>
-                        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 14 }}
-                          onClick={() => updateSCQty(item.id, 0)}>×</button>
-                      </td>
-                    </tr>
-                    {dimInfo && (
-                      <tr style={{ borderBottom: `1px solid ${C.borderLight}`, background: 'rgba(74,111,165,0.04)' }}>
-                        <td colSpan={showCost ? 7 : 6} style={{ padding: '0 0 8px 0' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
-                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>{dimInfo.label}:</span>
-                            <input
-                              style={{ ...s.input, width: 100, fontSize: 12, padding: '4px 8px', borderColor: item.customSize ? C.accent : C.border }}
-                              placeholder={dimInfo.placeholder}
-                              value={item.customSize || ''}
-                              onChange={e => updateSCCustomSize(item.id, e.target.value)}
-                            />
-                            {!item.customSize && <span style={{ fontSize: 10, color: C.danger }}>Enter custom size</span>}
+
+                    {/* ── Attached Special Constructions ── */}
+                    {attachedSCs.map((sc, scIdx) => {
+                      const dimInfo = DIMENSION_SC[sc.code];
+                      const isLast = scIdx === attachedSCs.length - 1;
+                      return (
+                      <React.Fragment key={sc.id}>
+                      <tr style={{
+                        borderBottom: (dimInfo || !isLast) ? 'none' : `1px solid ${C.borderLight}`,
+                        background: isSelected ? 'rgba(74,111,165,0.08)' : 'rgba(74,111,165,0.03)',
+                        borderLeft: selBorder,
+                      }}>
+                        <td style={{ padding: '4px 0 4px 16px', fontSize: 12, fontWeight: 600, color: C.accent }}>
+                          ↳ {sc.code}
+                        </td>
+                        <td style={{ padding: '4px 0', fontSize: 11, color: C.textSec }}>Special · {sc.section}</td>
+                        <td style={{ textAlign: 'center', padding: '4px 0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                            <button style={{ ...s.btn, padding: '1px 6px', fontSize: 10 }} onClick={() => updateAttachedSCQty(item.id, sc.id, sc.qty - 1)}>−</button>
+                            <span style={{ fontSize: 12, fontWeight: 600, minWidth: 16, textAlign: 'center' }}>{sc.qty}</span>
+                            <button style={{ ...s.btn, padding: '1px 6px', fontSize: 10 }} onClick={() => updateAttachedSCQty(item.id, sc.id, sc.qty + 1)}>+</button>
                           </div>
                         </td>
+                        <td style={{ textAlign: 'right', padding: '4px 0', fontSize: 12 }}>{fmtPts(sc.points)}</td>
+                        <td style={{ textAlign: 'right', padding: '4px 0', fontSize: 12, fontWeight: 600, color: C.accent }}>{fmtPts(sc.points * sc.qty)}</td>
+                        {showCost && <td style={{ textAlign: 'right', padding: '4px 0', fontSize: 12, color: C.success }}>{fmtCost(sc.points * sc.qty, cf / 100)}</td>}
+                        <td>
+                          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 12 }}
+                            onClick={() => updateAttachedSCQty(item.id, sc.id, 0)}>×</button>
+                        </td>
                       </tr>
-                    )}
+                      {dimInfo && (
+                        <tr style={{
+                          borderBottom: isLast ? `1px solid ${C.borderLight}` : 'none',
+                          background: isSelected ? 'rgba(74,111,165,0.08)' : 'rgba(74,111,165,0.03)',
+                          borderLeft: selBorder,
+                        }}>
+                          <td colSpan={showCost ? 7 : 6} style={{ padding: '0 0 6px 20px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>{dimInfo.label}:</span>
+                              <input
+                                style={{ ...s.input, width: 100, fontSize: 12, padding: '3px 6px', borderColor: sc.customSize ? C.accent : C.border }}
+                                placeholder={dimInfo.placeholder}
+                                value={sc.customSize || ''}
+                                onChange={e => updateAttachedSCCustomSize(item.id, sc.id, e.target.value)}
+                              />
+                              {!sc.customSize && <span style={{ fontSize: 10, color: C.danger }}>Enter custom size</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
+                      );
+                    })}
                     </React.Fragment>
                     );
                   })}
