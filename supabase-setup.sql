@@ -49,73 +49,48 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- 5. Row Level Security (RLS)
+-- 5. SECURITY DEFINER helper to check admin status (avoids RLS circular dependency)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
--- Enable RLS
+-- 6. Row Level Security (RLS)
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 
--- Profiles: users can read their own profile; admins can read all
-CREATE POLICY "Users can view own profile"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
+-- Profiles policies
+CREATE POLICY "profiles_select" ON public.profiles FOR SELECT
+  USING (auth.uid() = id OR public.is_admin());
 
-CREATE POLICY "Admins can view all profiles"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+CREATE POLICY "profiles_insert" ON public.profiles FOR INSERT
+  WITH CHECK (auth.uid() = id OR public.is_admin());
 
-CREATE POLICY "Admins can insert profiles"
-  ON public.profiles FOR INSERT
-  WITH CHECK (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-    OR auth.uid() = id  -- allow trigger/self-insert
-  );
+CREATE POLICY "profiles_update" ON public.profiles FOR UPDATE
+  USING (public.is_admin());
 
-CREATE POLICY "Admins can update profiles"
-  ON public.profiles FOR UPDATE
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+CREATE POLICY "profiles_delete" ON public.profiles FOR DELETE
+  USING (public.is_admin());
 
-CREATE POLICY "Admins can delete profiles"
-  ON public.profiles FOR DELETE
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+-- Orders policies
+CREATE POLICY "orders_select" ON public.orders FOR SELECT
+  USING (auth.uid() = user_id OR public.is_admin());
 
--- Orders: users can CRUD their own; admins can read all
-CREATE POLICY "Users can view own orders"
-  ON public.orders FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Admins can view all orders"
-  ON public.orders FOR SELECT
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
-
-CREATE POLICY "Users can create own orders"
-  ON public.orders FOR INSERT
+CREATE POLICY "orders_insert" ON public.orders FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update own orders"
-  ON public.orders FOR UPDATE
+CREATE POLICY "orders_update" ON public.orders FOR UPDATE
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own orders"
-  ON public.orders FOR DELETE
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Admins can delete any order"
-  ON public.orders FOR DELETE
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+CREATE POLICY "orders_delete" ON public.orders FOR DELETE
+  USING (auth.uid() = user_id OR public.is_admin());
 
 -- =============================================================
--- 6. Create your admin account
+-- 7. Create your admin account
 -- AFTER running this SQL, go to Supabase Auth → Users → create a user
 -- with your email/password. Then run:
 --
