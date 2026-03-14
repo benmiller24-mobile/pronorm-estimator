@@ -291,10 +291,24 @@ export default function App({ order, onBack }) {
           updated.finEndSSED = '';
           updated.finEndMat = 0;
         }
-        // When changing height code, auto-select first available depth
+        // When changing height code, auto-select first available depth + material
         if (field === 'finEndSSEH' && value) {
           const depths = getSSEDepths(Number(value));
-          updated.finEndSSED = depths.length > 0 ? String(depths[0]) : '';
+          const firstDepth = depths.length > 0 ? depths[0] : '';
+          updated.finEndSSED = firstDepth ? String(firstDepth) : '';
+          // Auto-select first material with non-zero price
+          if (firstDepth) {
+            const firstMat = PANEL_MATERIALS.findIndex(m => getSSEPrice(Number(value), firstDepth, m.idx) > 0);
+            updated.finEndMat = firstMat >= 0 ? firstMat : 0;
+          }
+        }
+        // When changing depth, auto-select first available material
+        if (field === 'finEndSSED' && value && updated.finEndSSEH) {
+          const curPrice = getSSEPrice(Number(updated.finEndSSEH), Number(value), updated.finEndMat || 0);
+          if (curPrice === 0) {
+            const firstMat = PANEL_MATERIALS.findIndex(m => getSSEPrice(Number(updated.finEndSSEH), Number(value), m.idx) > 0);
+            updated.finEndMat = firstMat >= 0 ? firstMat : 0;
+          }
         }
         return updated;
       }) };
