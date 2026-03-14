@@ -139,7 +139,15 @@ export default function App({ order, onBack }) {
     return map;
   }, []);
 
-  // Hydrate loaded items: ensure cat, catLabel, line are present from catalog
+  // Build SC lookup for hydrating attached special constructions
+  const scLookup = useMemo(() => {
+    const scs = parseSpecialConstructions(SPECIAL_CONSTRUCTIONS_RAW);
+    const map = {};
+    scs.forEach(sc => { map[sc.code] = sc; });
+    return map;
+  }, []);
+
+  // Hydrate loaded items: ensure cat, catLabel, line, and SC fields are present
   function hydrateRooms(rawRooms) {
     if (!Array.isArray(rawRooms) || rawRooms.length === 0) {
       return [{ id: Date.now(), name: 'Kitchen', items: [] }];
@@ -147,23 +155,46 @@ export default function App({ order, onBack }) {
     return rawRooms.map(room => ({
       ...room,
       items: (room.items || []).map(item => {
-        // If catLabel is already set, no need to hydrate
-        if (item.catLabel) return item;
-        // Look up from catalog by SKU
-        const catalogEntry = skuLookup[item.sku];
-        if (catalogEntry) {
-          return {
-            ...item,
-            cat: item.cat || catalogEntry.cat,
-            catLabel: catalogEntry.catLabel,
-            line: item.line || catalogEntry.line,
+        // Hydrate main item catLabel
+        let hydrated = item;
+        if (!item.catLabel) {
+          const catalogEntry = skuLookup[item.sku];
+          if (catalogEntry) {
+            hydrated = {
+              ...item,
+              cat: item.cat || catalogEntry.cat,
+              catLabel: catalogEntry.catLabel,
+              line: item.line || catalogEntry.line,
+            };
+          } else if (item.cat) {
+            hydrated = { ...item, catLabel: CATEGORY_LABELS[item.cat] || item.cat };
+          } else {
+            hydrated = { ...item, catLabel: 'Unknown' };
+          }
+        }
+        // Hydrate attached special constructions
+        if (hydrated.attachedSCs && hydrated.attachedSCs.length > 0) {
+          hydrated = {
+            ...hydrated,
+            attachedSCs: hydrated.attachedSCs.map(sc => {
+              // If section is already set, SC is complete
+              if (sc.section && sc.description) return sc;
+              // Look up from SC catalog by code
+              const scEntry = scLookup[sc.code];
+              if (scEntry) {
+                return {
+                  ...sc,
+                  description: sc.description || scEntry.description,
+                  points: sc.points ?? scEntry.points,
+                  section: sc.section || scEntry.section,
+                  notes: sc.notes || scEntry.notes,
+                };
+              }
+              return { ...sc, section: sc.section || 'Special', description: sc.description || sc.code };
+            }),
           };
         }
-        // Fallback: try to derive from cat field
-        if (item.cat) {
-          return { ...item, catLabel: CATEGORY_LABELS[item.cat] || item.cat };
-        }
-        return { ...item, catLabel: 'Unknown' };
+        return hydrated;
       }),
     }));
   }
