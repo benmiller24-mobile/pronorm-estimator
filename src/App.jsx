@@ -248,6 +248,8 @@ export default function App({ order, onBack }) {
   const [showCatalog, setShowCatalog] = useState(true);
   const listRef = useRef(null);
   const dragIndexRef = useRef(null);
+  const touchYRef = useRef(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   // Auto-save hook
   const { save, saveStatus, lastSaved } = useAutoSave(user?.id, orderId);
@@ -460,32 +462,75 @@ export default function App({ order, onBack }) {
     setRooms(rs => rs.map(r => r.id === id ? { ...r, name } : r));
   };
 
-  /* ── Drag-and-drop item reordering ── */
+  /* ── Drag-and-drop item reordering (desktop + mobile touch) ── */
+  const reorderItems = (fromIndex, toIndex) => {
+    if (fromIndex === null || fromIndex === toIndex) return;
+    setRooms(rs => rs.map(r => {
+      if (r.id !== activeRoom) return r;
+      const newItems = [...r.items];
+      const [draggedItem] = newItems.splice(fromIndex, 1);
+      newItems.splice(toIndex, 0, draggedItem);
+      return { ...r, items: newItems };
+    }));
+  };
+
+  // Desktop HTML5 drag
   const handleDragStart = (e, index) => {
     dragIndexRef.current = index;
     e.dataTransfer.effectAllowed = 'move';
   };
-
-  const handleDragOver = (e) => {
+  const handleDragOver = (e, index) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
   };
-
   const handleDrop = (e, dropIndex) => {
     e.preventDefault();
-    const dragIndex = dragIndexRef.current;
-    if (dragIndex === null || dragIndex === dropIndex) {
-      dragIndexRef.current = null;
-      return;
-    }
-    setRooms(rs => rs.map(r => {
-      if (r.id !== activeRoom) return r;
-      const newItems = [...r.items];
-      const [draggedItem] = newItems.splice(dragIndex, 1);
-      newItems.splice(dropIndex, 0, draggedItem);
-      return { ...r, items: newItems };
-    }));
+    reorderItems(dragIndexRef.current, dropIndex);
     dragIndexRef.current = null;
+    setDragOverIndex(null);
+  };
+  const handleDragEnd = () => {
+    dragIndexRef.current = null;
+    setDragOverIndex(null);
+  };
+
+  // Mobile touch drag (on the grip handle only)
+  // We store dragOverIndex in a ref too so the touchend handler always sees current value
+  const dragOverRef = useRef(null);
+  const setDragOver = (idx) => { dragOverRef.current = idx; setDragOverIndex(idx); };
+
+  const gripRef = useCallback((node) => {
+    if (!node) return;
+    // Attach non-passive touchmove so preventDefault works on mobile
+    const onMove = (e) => {
+      if (dragIndexRef.current === null) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      if (el) {
+        const row = el.closest('tr[data-item-index]');
+        if (row) {
+          const overIdx = parseInt(row.dataset.itemIndex, 10);
+          if (!isNaN(overIdx)) setDragOver(overIdx);
+        }
+      }
+    };
+    node.addEventListener('touchmove', onMove, { passive: false });
+    node._cleanupTouchMove = () => node.removeEventListener('touchmove', onMove);
+  }, []);
+
+  const handleTouchStart = (index) => {
+    dragIndexRef.current = index;
+    setDragOver(null);
+  };
+  const handleTouchEnd = () => {
+    if (dragIndexRef.current !== null && dragOverRef.current !== null) {
+      reorderItems(dragIndexRef.current, dragOverRef.current);
+    }
+    dragIndexRef.current = null;
+    touchYRef.current = null;
+    setDragOver(null);
   };
 
   /* ── Helpers for per-m² items ── */
@@ -884,21 +929,30 @@ export default function App({ order, onBack }) {
                     <React.Fragment key={item.id}>
                     {/* ── Cabinet row (clickable to select, draggable) ── */}
                     <tr
+                      data-item-index={itemIndex}
                       draggable
                       onDragStart={(e) => handleDragStart(e, itemIndex)}
-                      onDragOver={handleDragOver}
+                      onDragOver={(e) => handleDragOver(e, itemIndex)}
                       onDrop={(e) => handleDrop(e, itemIndex)}
+                      onDragEnd={handleDragEnd}
                       style={{
                         borderBottom: (item.isSqm || item.finEnd || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`,
-                        background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent',
+                        background: dragOverIndex === itemIndex && dragIndexRef.current !== null && dragIndexRef.current !== itemIndex
+                          ? 'rgba(176,141,76,0.12)' : isSelected ? 'rgba(74,111,165,0.06)' : 'transparent',
                         cursor: 'pointer',
                         borderLeft: selBorder,
                         opacity: dragIndexRef.current === itemIndex ? 0.5 : 1,
-                        transition: 'opacity 0.2s',
+                        transition: 'opacity 0.2s, background 0.15s',
                       }}
                       onClick={() => setSelectedItemId(isSelected ? null : item.id)}
                     >
                       <td style={{ padding: '8px 0 8px 4px', fontSize: 13, fontWeight: 600 }}>
+                        <span
+                          ref={gripRef}
+                          style={{ cursor: 'grab', padding: '4px 6px 4px 0', color: C.textTer, fontSize: 14, userSelect: 'none', touchAction: 'none' }}
+                          onTouchStart={() => handleTouchStart(itemIndex)}
+                          onTouchEnd={handleTouchEnd}
+                        >⠿</span>
                         {item.sku}
                         {isSelected && <span style={{ fontSize: 10, color: C.accent, marginLeft: 6 }}>SELECTED</span>}
                       </td>
