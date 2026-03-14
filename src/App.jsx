@@ -216,10 +216,7 @@ export default function App({ order, onBack }) {
         const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '', panelMaterial: defaultMat >= 0 ? defaultMat : 0, attachedSCs: [] };
         return { ...r, items: [...r.items, newItem] };
       }
-      const existing = r.items.find(x => x.sku === item.sku && !x.isSqm);
-      if (existing) {
-        return { ...r, items: r.items.map(x => x.sku === item.sku && !x.isSqm ? { ...x, qty: x.qty + 1 } : x) };
-      }
+      // Always create a new line item so each can have its own hinge/finished end
       const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [], hinge: '', finEnd: '', finEndSSEH: '', finEndSSED: '', finEndMat: 0 };
       setSelectedItemId(newItem.id);
       return { ...r, items: [...r.items, newItem] };
