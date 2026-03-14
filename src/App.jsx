@@ -217,7 +217,7 @@ export default function App({ order, onBack }) {
         return { ...r, items: [...r.items, newItem] };
       }
       // Always create a new line item so each can have its own hinge/finished end
-      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [], hinge: '', finEnd: '', finEndSSEH: '', finEndSSED: '', finEndMat: 0 };
+      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [], hinge: '', finEnd: '', finEndSSEH: '', finEndSSED: '', finEndMat: 0, pgOverride: '', customPts: '' };
       setSelectedItemId(newItem.id);
       return { ...r, items: [...r.items, newItem] };
     }));
@@ -368,14 +368,17 @@ export default function App({ order, onBack }) {
     const h = parseFloat(item.panelH) || 0;
     return (w * h) / 1000000;
   };
+  const getItemPG = (item) => item.pgOverride != null && item.pgOverride !== '' ? Number(item.pgOverride) : pg;
   const itemBaseTotal = (item) => {
+    if (item.customPts != null && item.customPts !== '') return Number(item.customPts) * item.qty;
     if (item.isSqm) {
       const sqm = calcSqm(item);
       const matIdx = item.panelMaterial ?? 0;
       const pricePerSqm = item.prices[matIdx] || 0;
       return Math.round(pricePerSqm * sqm * item.qty);
     }
-    return item.prices[pg] * item.qty;
+    const itemPg = getItemPG(item);
+    return (item.prices[itemPg] || 0) * item.qty;
   };
   const itemSCTotal = (item) => {
     return (item.attachedSCs || []).reduce((s, sc) => s + sc.points * sc.qty, 0);
@@ -416,7 +419,8 @@ export default function App({ order, onBack }) {
       const sqmVal = i.isSqm ? ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) : 0;
       const matName = i.isSqm ? (PANEL_MATERIALS.find(m=>m.idx===matIdx)||{}).code||'' : '';
       const sqmNote = i.isSqm ? ' <span style="color:#4a6fa5;font-size:11px">[' + matName + ' · ' + sqmVal.toFixed(4) + ' m²]</span>' : '';
-      const unitLabel = i.isSqm ? fmtPts(matPr) + '/m²' : fmtPts(i.prices[pg]);
+      const itemPg = getItemPG(i);
+      const unitLabel = (i.customPts != null && i.customPts !== '') ? fmtPts(Number(i.customPts)) + '*' : i.isSqm ? fmtPts(matPr) + '/m²' : fmtPts(i.prices[itemPg] || 0);
       const hingeLabel = i.hinge === 'L' ? 'Left' : i.hinge === 'R' ? 'Right' : '—';
       const feLabel = i.finEnd === 'L' ? 'Left' : i.finEnd === 'R' ? 'Right' : i.finEnd === 'LR' ? 'Both' : '—';
       const feCode = (i.finEnd && i.finEndSSEH && i.finEndSSED) ? getSSECode(Number(i.finEndSSEH), Number(i.finEndSSED)) : '';
@@ -760,7 +764,12 @@ export default function App({ order, onBack }) {
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13 }}>
-                        {item.isSqm ? `${fmtPts(matPrice)}/m²` : fmtPts(item.prices[pg])}
+                        {item.customPts != null && item.customPts !== '' ? (
+                          <span style={{ color: C.accent }}>{fmtPts(Number(item.customPts))}</span>
+                        ) : item.isSqm ? `${fmtPts(matPrice)}/m²` : fmtPts(item.prices[getItemPG(item)] || 0)}
+                        {item.pgOverride != null && item.pgOverride !== '' && !item.isSqm && (item.customPts == null || item.customPts === '') && (
+                          <span style={{ fontSize: 9, color: C.accent, display: 'block' }}>PG {PG_NAMES[Number(item.pgOverride)]}</span>
+                        )}
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, fontWeight: 600 }}>{fmtPts(fullTotal)}</td>
                       {showCost && <td style={{ textAlign: 'right', padding: '8px 0', fontSize: 13, color: C.success }}>{fmtCost(fullTotal, cf / 100)}</td>}
@@ -868,6 +877,42 @@ export default function App({ order, onBack }) {
                         </tr>
                       );
                     })()}
+
+                    {/* ── PG Override / Custom Pts row (when selected) ── */}
+                    {isSelected && !item.isSqm && (
+                      <tr style={{ borderBottom: attachedSCs.length > 0 ? 'none' : `1px solid ${C.borderLight}`, background: 'rgba(74,111,165,0.06)', borderLeft: selBorder }}>
+                        <td colSpan={showCost ? 9 : 8} style={{ padding: '4px 4px 6px 4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>PG Override:</span>
+                            <select
+                              style={{ ...s.select, fontSize: 11, padding: '2px 20px 2px 4px', minWidth: 80 }}
+                              value={item.pgOverride != null && item.pgOverride !== '' ? item.pgOverride : ''}
+                              onChange={e => updateItemProp(item.id, 'pgOverride', e.target.value === '' ? '' : Number(e.target.value))}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <option value="">Auto (PG {PG_NAMES[pg]})</option>
+                              {PG_NAMES.map((name, idx) => (
+                                <option key={idx} value={idx} disabled={!item.prices[idx]}>{name} — {fmtPts(item.prices[idx] || 0)}</option>
+                              ))}
+                            </select>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600, marginLeft: 4 }}>Custom Pts:</span>
+                            <input
+                              style={{ ...s.input, width: 80, fontSize: 12, padding: '2px 6px', borderColor: (item.customPts != null && item.customPts !== '') ? C.accent : C.border }}
+                              placeholder="auto"
+                              value={item.customPts != null && item.customPts !== '' ? item.customPts : ''}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => {
+                                const v = e.target.value;
+                                updateItemProp(item.id, 'customPts', v === '' ? '' : v.replace(/[^0-9.]/g, ''));
+                              }}
+                            />
+                            {(item.customPts != null && item.customPts !== '') && (
+                              <span style={{ fontSize: 10, color: C.accent }}>overrides PG</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
 
                     {/* ── Attached Special Constructions ── */}
                     {attachedSCs.map((sc, scIdx) => {
