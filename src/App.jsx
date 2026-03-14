@@ -502,7 +502,8 @@ export default function App({ order, onBack }) {
       }
       (i.attachedSCs || []).forEach(sc => {
         const sizeNote = sc.customSize ? ' [' + sc.customSize + 'mm]' : '';
-        html += '<tr class="sc"><td style="padding-left:24px">&nbsp;&nbsp;↳ ' + sc.code + sizeNote + '</td><td>Special · ' + (sc.section||'—') + '</td><td></td><td></td><td class="r">' + sc.qty + '</td><td class="r">' + fmtPts(sc.points) + '</td><td class="r">' + fmtPts(sc.points * sc.qty) + '</td>' + costTd(sc.points * sc.qty) + '</tr>';
+        const scSection = sc.section || (scLookup[sc.code] && scLookup[sc.code].section) || '—';
+        html += '<tr class="sc"><td style="padding-left:24px">&nbsp;&nbsp;↳ ' + sc.code + sizeNote + '</td><td>Special · ' + scSection + '</td><td></td><td></td><td class="r">' + sc.qty + '</td><td class="r">' + fmtPts(sc.points) + '</td><td class="r">' + fmtPts(sc.points * sc.qty) + '</td>' + costTd(sc.points * sc.qty) + '</tr>';
       });
       return html;
     }
@@ -996,7 +997,7 @@ export default function App({ order, onBack }) {
                         <td style={{ padding: '4px 0 4px 16px', fontSize: 12, fontWeight: 600, color: C.accent }}>
                           ↳ {sc.code}
                         </td>
-                        <td style={{ padding: '4px 0', fontSize: 11, color: C.textSec }}>Special · {sc.section}</td>
+                        <td style={{ padding: '4px 0', fontSize: 11, color: C.textSec }}>Special · {sc.section || (scLookup[sc.code] && scLookup[sc.code].section) || '—'}</td>
                         <td></td><td></td>
                         <td style={{ textAlign: 'center', padding: '4px 0' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
