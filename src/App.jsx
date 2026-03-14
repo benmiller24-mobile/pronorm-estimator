@@ -35,9 +35,11 @@ const PANEL_MATERIALS = [
 /* ── Per-m² panel SKUs (priced per square metre — need W×H input + material) ── */
 const PER_SQM_SKUS = new Set([
   'ST 10-00-02','ST 16-00-02','ST 25-00-02','ST 50-00-02',
+  'WS 10-00-01','WS 16-00-01','WS 25-00-01','WS 50-00-01',
   'WS 10-00-02','WS 16-00-02','WS 25-00-02','WS 50-00-02',
-  'WN 16-00-02','WN 25-00-02','WN 50-00-02',
-  'WW 16-00-02','WW 25-00-02','WW 50-00-02',
+  'WN 16-00-01','WN 16-00-02','WN 25-00-02','WN 50-00-02',
+  'WW 16-00-01','WW 16-00-02','WW 25-00-02','WW 50-00-02',
+  'WR 16-00-02','WR 25-00-02','WR 50-00-02',
 ]);
 
 /* ── Dimension-based special construction codes ── */
