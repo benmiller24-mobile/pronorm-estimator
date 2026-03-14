@@ -166,10 +166,20 @@ export default function App({ order, onBack }) {
               catLabel: catalogEntry.catLabel,
               line: item.line || catalogEntry.line,
             };
-          } else if (item.cat) {
-            hydrated = { ...item, catLabel: CATEGORY_LABELS[item.cat] || item.cat };
           } else {
-            hydrated = { ...item, catLabel: 'Unknown' };
+            // Check if this is a special construction code stored as a top-level item
+            const scEntry = scLookup[item.sku];
+            if (scEntry) {
+              hydrated = {
+                ...item,
+                catLabel: 'Special · ' + (scEntry.section || 'SC'),
+                cat: item.cat || 'Special',
+              };
+            } else if (item.cat) {
+              hydrated = { ...item, catLabel: CATEGORY_LABELS[item.cat] || item.cat };
+            } else {
+              hydrated = { ...item, catLabel: 'Special Construction' };
+            }
           }
         }
         // Hydrate attached special constructions
