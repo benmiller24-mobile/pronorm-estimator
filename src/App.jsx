@@ -3,6 +3,7 @@ import {
   RAW_DATA, SPECIAL_CONSTRUCTIONS_RAW, CATEGORIES, CATEGORY_LABELS,
   CATEGORY_GROUPS, LINES, PG_NAMES, PG_MULTIPLIERS,
   parseData, parseSpecialConstructions,
+  SSE_DATA, SSE_HEIGHTS,
 } from './data.js';
 import { useAuth } from './AuthContext.jsx';
 import { useAutoSave } from './useAutoSave.js';
@@ -68,6 +69,56 @@ const DIMENSION_SC = {
   'X-13-O':  { dim: 'side', label: 'Side dim (mm)', placeholder: 'e.g. 400' },
   'X-12-O':  { dim: 'front', label: 'Front dim (mm)', placeholder: 'e.g. 400' },
 };
+
+/* ── Finished End (SSE) helpers ── */
+const HINGE_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'L', label: 'Left' },
+  { value: 'R', label: 'Right' },
+];
+const FE_OPTIONS = [
+  { value: '', label: 'None' },
+  { value: 'L', label: 'Left' },
+  { value: 'R', label: 'Right' },
+  { value: 'LR', label: 'Both' },
+];
+
+// Build SSE lookup: { heightCode: { depthCode: [code, prices] } }
+const SSE_LOOKUP = {};
+SSE_DATA.forEach(([code, h, d, prices]) => {
+  if (!SSE_LOOKUP[h]) SSE_LOOKUP[h] = {};
+  if (!SSE_LOOKUP[h][d]) SSE_LOOKUP[h][d] = [code, prices];
+});
+
+// Get unique SSE height codes with available depths
+const SSE_HEIGHT_OPTIONS = SSE_HEIGHTS.filter(h => SSE_LOOKUP[h.code]);
+
+// Get available depths for a height code
+function getSSEDepths(heightCode) {
+  const hData = SSE_LOOKUP[heightCode];
+  if (!hData) return [];
+  return Object.keys(hData).map(Number).sort((a, b) => a - b);
+}
+
+// Get SSE price for a specific height, depth, material
+function getSSEPrice(heightCode, depthCode, materialIdx) {
+  const hData = SSE_LOOKUP[heightCode];
+  if (!hData) return 0;
+  const entry = hData[depthCode];
+  if (!entry) return 0;
+  return entry[1][materialIdx] || 0;
+}
+
+// Get SSE code for height+depth
+function getSSECode(heightCode, depthCode) {
+  const hData = SSE_LOOKUP[heightCode];
+  if (!hData) return '';
+  const entry = hData[depthCode];
+  return entry ? entry[0] : '';
+}
+
+// Depth code labels
+const SSE_DEPTH_LABELS = { 10:'100mm', 35:'351mm', 46:'465mm', 47:'475mm', 56:'565mm', 57:'575mm', 71:'715mm', 120:'1200mm' };
 
 /* ── Format helpers ── */
 const fmtPts = n => n.toLocaleString() + ' pts';
@@ -169,7 +220,7 @@ export default function App({ order, onBack }) {
       if (existing) {
         return { ...r, items: r.items.map(x => x.sku === item.sku && !x.isSqm ? { ...x, qty: x.qty + 1 } : x) };
       }
-      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [] };
+      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [], hinge: '', finEnd: '', finEndSSEH: '', finEndSSED: '', finEndMat: 0 };
       setSelectedItemId(newItem.id);
       return { ...r, items: [...r.items, newItem] };
     }));
@@ -224,6 +275,29 @@ export default function App({ order, onBack }) {
     setRooms(rs => rs.map(r => {
       if (r.id !== activeRoom) return r;
       return { ...r, items: r.items.map(x => x.id === itemId ? { ...x, [field]: value } : x) };
+    }));
+  };
+
+  /* ── Update item property (hinge, finished end, etc.) ── */
+  const updateItemProp = (itemId, field, value) => {
+    setRooms(rs => rs.map(r => {
+      if (r.id !== activeRoom) return r;
+      return { ...r, items: r.items.map(x => {
+        if (x.id !== itemId) return x;
+        const updated = { ...x, [field]: value };
+        // When changing finished end to 'none', clear SSE settings
+        if (field === 'finEnd' && !value) {
+          updated.finEndSSEH = '';
+          updated.finEndSSED = '';
+          updated.finEndMat = 0;
+        }
+        // When changing height code, auto-select first available depth
+        if (field === 'finEndSSEH' && value) {
+          const depths = getSSEDepths(Number(value));
+          updated.finEndSSED = depths.length > 0 ? String(depths[0]) : '';
+        }
+        return updated;
+      }) };
     }));
   };
 
@@ -295,7 +369,13 @@ export default function App({ order, onBack }) {
   const itemSCTotal = (item) => {
     return (item.attachedSCs || []).reduce((s, sc) => s + sc.points * sc.qty, 0);
   };
-  const itemFullTotal = (item) => itemBaseTotal(item) + itemSCTotal(item);
+  const itemFinEndTotal = (item) => {
+    if (!item.finEnd || !item.finEndSSEH || !item.finEndSSED) return 0;
+    const price = getSSEPrice(Number(item.finEndSSEH), Number(item.finEndSSED), item.finEndMat || 0);
+    const sides = item.finEnd === 'LR' ? 2 : 1;
+    return price * sides * item.qty;
+  };
+  const itemFullTotal = (item) => itemBaseTotal(item) + itemSCTotal(item) + itemFinEndTotal(item);
 
   /* ── Totals ── */
   const roomTotal = (r) => (r.items || []).reduce((s, i) => s + itemFullTotal(i), 0);
@@ -315,49 +395,62 @@ export default function App({ order, onBack }) {
 
   /* ── PDF export ── */
   const exportPDF = () => {
-    const w = window.open('', '_blank');
-    const html = `<!DOCTYPE html><html><head><title>${projectName} - Order</title>
-    <style>body{font-family:${FONT};margin:40px;color:#191919}
-    h1{font-family:${SERIF};font-weight:400;font-size:28px;margin-bottom:4px}
-    h2{font-size:16px;margin-top:24px;border-bottom:1px solid #e4e1dc;padding-bottom:6px}
-    table{width:100%;border-collapse:collapse;margin:12px 0}
-    th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #eceae6;font-size:13px}
-    th{background:#f7f6f3;font-weight:600}
-    .r{text-align:right}.footer{margin-top:30px;font-size:11px;color:#8a8580}
-    .sc{color:#4a6fa5;font-size:12px}
-    .total{font-weight:700;font-size:15px;border-top:2px solid #191919}</style></head><body>
-    <h1>${projectName}</h1>
-    <div style="font-size:12px;color:#8a8580">PG: ${PG_NAMES[pg]} · ${new Date().toLocaleDateString()}</div>
-    ${rooms.map(r => `
-      <h2>${r.name}</h2>
-      <table><tr><th>SKU</th><th>Type</th><th>Line</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>${showCost ? '<th class="r">Cost</th>' : ''}</tr>
-      ${(r.items || []).map(i => {
-        const matIdx = i.panelMaterial ?? 0;
-        const matPr = i.isSqm ? (i.prices[matIdx] || 0) : 0;
-        const sqmVal = i.isSqm ? ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) : 0;
-        const baseTot = i.isSqm ? Math.round(matPr * sqmVal * i.qty) : i.prices[pg] * i.qty;
-        const matName = i.isSqm ? (PANEL_MATERIALS.find(m=>m.idx===matIdx)||{}).code||'' : '';
-        const sqmNote = i.isSqm ? ` <span style="color:#4a6fa5;font-size:11px">[${matName} · ${sqmVal.toFixed(4)} m²]</span>` : '';
-        const unitLabel = i.isSqm ? `${fmtPts(matPr)}/m²` : fmtPts(i.prices[pg]);
-        let rows = `<tr><td>${i.sku}${sqmNote}</td><td>${i.catLabel}</td><td>${i.line}</td><td class="r">${i.qty}</td><td class="r">${unitLabel}</td><td class="r">${fmtPts(baseTot)}</td>${showCost ? `<td class="r">${fmtCost(baseTot, cf / 100)}</td>` : ''}</tr>`;
-        // Attached SCs
-        (i.attachedSCs || []).forEach(sc => {
-          const dimInfo = DIMENSION_SC[sc.code];
-          const sizeNote = sc.customSize ? ` [${sc.customSize}mm]` : '';
-          rows += `<tr class="sc"><td style="padding-left:24px">&nbsp;&nbsp;↳ ${sc.code}${sizeNote}</td><td>Special · ${sc.section||'—'}</td><td></td><td class="r">${sc.qty}</td><td class="r">${fmtPts(sc.points)}</td><td class="r">${fmtPts(sc.points * sc.qty)}</td>${showCost ? `<td class="r">${fmtCost(sc.points * sc.qty, cf / 100)}</td>` : ''}</tr>`;
-        });
-        return rows;
-      }).join('')}
-      <tr class="total"><td colspan="5">Room Total</td><td class="r">${fmtPts(roomTotal(r))}</td>${showCost ? `<td class="r">${fmtCost(roomTotal(r), cf / 100)}</td>` : ''}</tr>
-      </table>
-    `).join('')}
-    <div style="margin-top:20px;padding-top:12px;border-top:2px solid #191919;font-size:16px;font-weight:700">
-      Grand Total: ${fmtPts(grandTotal)}${showCost ? ` · ${fmtCost(grandTotal, cf / 100)}` : ''}
-    </div>
-    <div class="footer">Pronorm Dealer Estimator · Price Book 09/2025 · ${grandCount} items · ${rooms.length} room(s)</div>
-    <script>window.print()</script></body></html>`;
-    w.document.write(html);
-    w.document.close();
+    const pWin = window.open('', '_blank');
+    const costTh = showCost ? '<th class="r">Cost</th>' : '';
+    const costTd = (pts) => showCost ? '<td class="r">' + fmtCost(pts, cf / 100) + '</td>' : '';
+
+    function buildItemRows(i) {
+      const matIdx = i.panelMaterial ?? 0;
+      const matPr = i.isSqm ? (i.prices[matIdx] || 0) : 0;
+      const sqmVal = i.isSqm ? ((parseFloat(i.panelW)||0)*(parseFloat(i.panelH)||0)/1000000) : 0;
+      const matName = i.isSqm ? (PANEL_MATERIALS.find(m=>m.idx===matIdx)||{}).code||'' : '';
+      const sqmNote = i.isSqm ? ' <span style="color:#4a6fa5;font-size:11px">[' + matName + ' · ' + sqmVal.toFixed(4) + ' m²]</span>' : '';
+      const unitLabel = i.isSqm ? fmtPts(matPr) + '/m²' : fmtPts(i.prices[pg]);
+      const hingeLabel = i.hinge === 'L' ? 'Left' : i.hinge === 'R' ? 'Right' : '—';
+      const feLabel = i.finEnd === 'L' ? 'Left' : i.finEnd === 'R' ? 'Right' : i.finEnd === 'LR' ? 'Both' : '—';
+      const feCode = (i.finEnd && i.finEndSSEH && i.finEndSSED) ? getSSECode(Number(i.finEndSSEH), Number(i.finEndSSED)) : '';
+      const fePrice = itemFinEndTotal(i);
+      const total = itemFullTotal(i);
+      let html = '<tr><td>' + i.sku + sqmNote + '</td><td>' + i.catLabel + '</td><td>' + hingeLabel + '</td><td>' + feLabel + (feCode ? ' (' + feCode + ')' : '') + '</td><td class="r">' + i.qty + '</td><td class="r">' + unitLabel + '</td><td class="r">' + fmtPts(total) + '</td>' + costTd(total) + '</tr>';
+      if (feCode && fePrice > 0) {
+        const feMat = (PANEL_MATERIALS.find(m=>m.idx===(i.finEndMat||0))||{}).code||'';
+        const feUnit = getSSEPrice(Number(i.finEndSSEH), Number(i.finEndSSED), i.finEndMat || 0);
+        html += '<tr class="sc"><td style="padding-left:24px">&nbsp;&nbsp;↳ ' + feCode + '</td><td>Finished End · ' + feMat + '</td><td></td><td></td><td class="r">' + (i.finEnd==='LR'?2:1) + '</td><td class="r">' + fmtPts(feUnit) + '</td><td class="r">' + fmtPts(fePrice) + '</td>' + costTd(fePrice) + '</tr>';
+      }
+      (i.attachedSCs || []).forEach(sc => {
+        const sizeNote = sc.customSize ? ' [' + sc.customSize + 'mm]' : '';
+        html += '<tr class="sc"><td style="padding-left:24px">&nbsp;&nbsp;↳ ' + sc.code + sizeNote + '</td><td>Special · ' + (sc.section||'—') + '</td><td></td><td></td><td class="r">' + sc.qty + '</td><td class="r">' + fmtPts(sc.points) + '</td><td class="r">' + fmtPts(sc.points * sc.qty) + '</td>' + costTd(sc.points * sc.qty) + '</tr>';
+      });
+      return html;
+    }
+
+    const roomsHtml = rooms.map(r => {
+      const rTotal = roomTotal(r);
+      return '<h2>' + r.name + '</h2><table><tr><th>SKU</th><th>Type</th><th>Hinge</th><th>Fin End</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>' + costTh + '</tr>' +
+        (r.items || []).map(buildItemRows).join('') +
+        '<tr class="total"><td colspan="6">Room Total</td><td class="r">' + fmtPts(rTotal) + '</td>' + costTd(rTotal) + '</tr></table>';
+    }).join('');
+
+    const html = '<!DOCTYPE html><html><head><title>' + projectName + ' - Order</title>' +
+      '<style>body{font-family:' + FONT + ';margin:40px;color:#191919}' +
+      'h1{font-family:' + SERIF + ';font-weight:400;font-size:28px;margin-bottom:4px}' +
+      'h2{font-size:16px;margin-top:24px;border-bottom:1px solid #e4e1dc;padding-bottom:6px}' +
+      'table{width:100%;border-collapse:collapse;margin:12px 0}' +
+      'th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #eceae6;font-size:13px}' +
+      'th{background:#f7f6f3;font-weight:600}' +
+      '.r{text-align:right}.footer{margin-top:30px;font-size:11px;color:#8a8580}' +
+      '.sc{color:#4a6fa5;font-size:12px}' +
+      '.total{font-weight:700;font-size:15px;border-top:2px solid #191919}</style></head><body>' +
+      '<h1>' + projectName + '</h1>' +
+      '<div style="font-size:12px;color:#8a8580">PG: ' + PG_NAMES[pg] + ' · ' + new Date().toLocaleDateString() + '</div>' +
+      roomsHtml +
+      '<div style="margin-top:20px;padding-top:12px;border-top:2px solid #191919;font-size:16px;font-weight:700">' +
+      'Grand Total: ' + fmtPts(grandTotal) + (showCost ? ' · ' + fmtCost(grandTotal, cf / 100) : '') +
+      '</div>' +
+      '<div class="footer">Pronorm Dealer Estimator · Price Book 09/2025 · ' + grandCount + ' items · ' + rooms.length + ' room(s)</div>' +
+      '<script>window.print()</' + 'script></body></html>';
+    pWin.document.write(html);
+    pWin.document.close();
   };
 
   /* ── Styles ── */
@@ -589,6 +682,8 @@ export default function App({ order, onBack }) {
                   <tr style={{ borderBottom: `2px solid ${C.border}` }}>
                     <th style={{ textAlign: 'left', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec }}>Item</th>
                     <th style={{ textAlign: 'left', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec }}>Type</th>
+                    <th style={{ textAlign: 'center', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec, width: 50 }}>Hinge</th>
+                    <th style={{ textAlign: 'center', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec, width: 60 }}>Fin End</th>
                     <th style={{ textAlign: 'center', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec, width: 80 }}>Qty</th>
                     <th style={{ textAlign: 'right', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec, width: 90 }}>Unit</th>
                     <th style={{ textAlign: 'right', padding: '6px 0', fontSize: 12, fontWeight: 600, color: C.textSec, width: 90 }}>Total</th>
@@ -602,7 +697,8 @@ export default function App({ order, onBack }) {
                     const sqm = item.isSqm ? calcSqm(item) : 0;
                     const baseTotal = itemBaseTotal(item);
                     const scTotal = itemSCTotal(item);
-                    const fullTotal = baseTotal + scTotal;
+                    const feTotal = itemFinEndTotal(item);
+                    const fullTotal = baseTotal + scTotal + feTotal;
                     const matIdx = item.panelMaterial ?? 0;
                     const matPrice = item.isSqm ? (item.prices[matIdx] || 0) : 0;
                     const availMats = item.isSqm ? PANEL_MATERIALS.filter(m => item.prices[m.idx] > 0) : [];
@@ -614,7 +710,7 @@ export default function App({ order, onBack }) {
                     {/* ── Cabinet row (clickable to select) ── */}
                     <tr
                       style={{
-                        borderBottom: (item.isSqm || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`,
+                        borderBottom: (item.isSqm || item.finEnd || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`,
                         background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent',
                         cursor: 'pointer',
                         borderLeft: selBorder,
@@ -628,6 +724,22 @@ export default function App({ order, onBack }) {
                       <td style={{ padding: '8px 0', fontSize: 12, color: C.textSec }}>
                         {item.catLabel} · {item.line}
                         {item.isSqm && <span style={{ color: C.accent, fontWeight: 600 }}> · per m²</span>}
+                      </td>
+                      <td style={{ textAlign: 'center', padding: '8px 0' }} onClick={e => e.stopPropagation()}>
+                        {!item.isSqm && (
+                          <select style={{ ...s.select, fontSize: 10, padding: '2px 18px 2px 4px', width: 48 }}
+                            value={item.hinge || ''} onChange={e => updateItemProp(item.id, 'hinge', e.target.value)}>
+                            {HINGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center', padding: '8px 0' }} onClick={e => e.stopPropagation()}>
+                        {!item.isSqm && (
+                          <select style={{ ...s.select, fontSize: 10, padding: '2px 18px 2px 4px', width: 58, borderColor: item.finEnd ? C.gold : C.border }}
+                            value={item.finEnd || ''} onChange={e => updateItemProp(item.id, 'finEnd', e.target.value)}>
+                            {FE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        )}
                       </td>
                       <td style={{ textAlign: 'center', padding: '8px 0' }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
@@ -649,8 +761,8 @@ export default function App({ order, onBack }) {
 
                     {/* ── Per-m² dimension inputs ── */}
                     {item.isSqm && (
-                      <tr style={{ borderBottom: attachedSCs.length > 0 ? 'none' : `1px solid ${C.borderLight}`, background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent', borderLeft: selBorder }}>
-                        <td colSpan={showCost ? 7 : 6} style={{ padding: '2px 0 8px 4px' }}>
+                      <tr style={{ borderBottom: (item.finEnd || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`, background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent', borderLeft: selBorder }}>
+                        <td colSpan={showCost ? 9 : 8} style={{ padding: '2px 0 8px 4px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>Material:</span>
                             <select
@@ -686,6 +798,66 @@ export default function App({ order, onBack }) {
                       </tr>
                     )}
 
+                    {/* ── Finished End SSE config row ── */}
+                    {item.finEnd && !item.isSqm && (() => {
+                      const feH = item.finEndSSEH ? Number(item.finEndSSEH) : '';
+                      const feD = item.finEndSSED ? Number(item.finEndSSED) : '';
+                      const feMat = item.finEndMat || 0;
+                      const availDepths = feH ? getSSEDepths(feH) : [];
+                      const sseCode = (feH && feD) ? getSSECode(feH, feD) : '';
+                      const ssePrice = (feH && feD) ? getSSEPrice(feH, feD, feMat) : 0;
+                      const sides = item.finEnd === 'LR' ? 2 : 1;
+                      const feSideLabel = item.finEnd === 'L' ? 'Left' : item.finEnd === 'R' ? 'Right' : 'Both (×2)';
+                      const availFEMats = PANEL_MATERIALS.filter(m => {
+                        if (!feH || !feD) return false;
+                        return getSSEPrice(feH, feD, m.idx) > 0;
+                      });
+                      return (
+                        <tr style={{
+                          borderBottom: attachedSCs.length > 0 ? 'none' : `1px solid ${C.borderLight}`,
+                          background: isSelected ? 'rgba(176,141,76,0.06)' : 'rgba(176,141,76,0.03)',
+                          borderLeft: selBorder,
+                        }}>
+                          <td colSpan={showCost ? 9 : 8} style={{ padding: '4px 0 6px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: C.gold }}>↳ Finished End ({feSideLabel}):</span>
+                              <select style={{ ...s.select, fontSize: 10, padding: '2px 20px 2px 4px', minWidth: 120 }}
+                                value={item.finEndSSEH || ''} onChange={e => updateItemProp(item.id, 'finEndSSEH', e.target.value)}>
+                                <option value="">Select height...</option>
+                                {SSE_HEIGHT_OPTIONS.map(h => (
+                                  <option key={h.code} value={h.code}>{h.label}</option>
+                                ))}
+                              </select>
+                              {feH && (
+                                <select style={{ ...s.select, fontSize: 10, padding: '2px 20px 2px 4px', minWidth: 90 }}
+                                  value={item.finEndSSED || ''} onChange={e => updateItemProp(item.id, 'finEndSSED', e.target.value)}>
+                                  <option value="">Depth...</option>
+                                  {availDepths.map(d => (
+                                    <option key={d} value={d}>{SSE_DEPTH_LABELS[d] || d + '0mm'}</option>
+                                  ))}
+                                </select>
+                              )}
+                              {feH && feD && availFEMats.length > 0 && (
+                                <select style={{ ...s.select, fontSize: 10, padding: '2px 20px 2px 4px', minWidth: 130 }}
+                                  value={feMat} onChange={e => updateItemProp(item.id, 'finEndMat', parseInt(e.target.value))}>
+                                  {availFEMats.map(m => (
+                                    <option key={m.idx} value={m.idx}>{m.code} ({fmtPts(getSSEPrice(feH, feD, m.idx))})</option>
+                                  ))}
+                                </select>
+                              )}
+                              {sseCode && ssePrice > 0 && (
+                                <span style={{ fontSize: 11, color: C.gold, fontWeight: 600 }}>
+                                  {sseCode} · {fmtPts(ssePrice)}{sides > 1 ? ` ×${sides} = ${fmtPts(ssePrice * sides)}` : ''}/ea
+                                </span>
+                              )}
+                              {feH && !feD && <span style={{ fontSize: 10, color: C.danger }}>Select depth</span>}
+                              {!feH && <span style={{ fontSize: 10, color: C.danger }}>Select carcase height</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })()}
+
                     {/* ── Attached Special Constructions ── */}
                     {attachedSCs.map((sc, scIdx) => {
                       const dimInfo = DIMENSION_SC[sc.code];
@@ -701,6 +873,7 @@ export default function App({ order, onBack }) {
                           ↳ {sc.code}
                         </td>
                         <td style={{ padding: '4px 0', fontSize: 11, color: C.textSec }}>Special · {sc.section}</td>
+                        <td></td><td></td>
                         <td style={{ textAlign: 'center', padding: '4px 0' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                             <button style={{ ...s.btn, padding: '1px 6px', fontSize: 10 }} onClick={() => updateAttachedSCQty(item.id, sc.id, sc.qty - 1)}>−</button>
@@ -722,7 +895,7 @@ export default function App({ order, onBack }) {
                           background: isSelected ? 'rgba(74,111,165,0.08)' : 'rgba(74,111,165,0.03)',
                           borderLeft: selBorder,
                         }}>
-                          <td colSpan={showCost ? 7 : 6} style={{ padding: '0 0 6px 20px' }}>
+                          <td colSpan={showCost ? 9 : 8} style={{ padding: '0 0 6px 20px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>{dimInfo.label}:</span>
                               <input
