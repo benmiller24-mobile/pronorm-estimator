@@ -4,6 +4,14 @@ import { loadOrders, createOrder, deleteOrder } from './useAutoSave.js';
 
 const FONT = "'DM Sans',system-ui,sans-serif";
 const SERIF = "'Cormorant Garamond','Georgia',serif";
+
+// Inject hover style for order cards (CSS-based so it doesn't break mobile taps)
+if (typeof document !== 'undefined' && !document.getElementById('order-card-style')) {
+  const style = document.createElement('style');
+  style.id = 'order-card-style';
+  style.textContent = '@media(hover:hover){.order-card:hover{border-color:#b08d4c !important}}';
+  document.head.appendChild(style);
+}
 const C = {
   bg: '#f7f6f3', card: '#fff', dark: '#191919', gold: '#b08d4c',
   goldMuted: 'rgba(176,141,76,.12)', border: '#e4e1dc', borderLight: '#eceae6',
@@ -108,13 +116,12 @@ export default function OrderList({ onOpenOrder }) {
               return (
                 <div
                   key={o.id}
+                  className="order-card"
                   style={{
                     background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
                     padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16,
                     cursor: 'pointer', transition: 'border-color .15s',
                   }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = C.gold}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
                   onClick={() => onOpenOrder(o)}
                 >
                   <div style={{ flex: 1 }}>
