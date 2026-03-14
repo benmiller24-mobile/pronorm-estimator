@@ -28,6 +28,7 @@ export function useAutoSave(userId, orderId) {
         pg: orderData.pg,
         cf: orderData.cf,
         show_cost: orderData.showCost,
+        notes: orderData.orderNotes || '',
         updated_at: new Date().toISOString(),
       };
 
@@ -133,4 +134,47 @@ export async function deleteOrder(orderId) {
     return false;
   }
   return true;
+}
+
+/**
+ * Duplicate an order with new IDs for rooms and items.
+ */
+export async function duplicateOrder(sourceOrder, userId) {
+  if (!sourceOrder || !userId) return null;
+
+  // Deep copy and regenerate IDs for rooms and items
+  const newRooms = (sourceOrder.rooms || []).map(room => ({
+    ...room,
+    id: Date.now() + Math.random(),
+    items: (room.items || []).map(item => ({
+      ...item,
+      id: Date.now() + Math.random(),
+      attachedSCs: (item.attachedSCs || []).map(sc => ({
+        ...sc,
+        id: Date.now() + Math.random(),
+      })),
+    })),
+  }));
+
+  const newOrder = {
+    user_id: userId,
+    project_name: sourceOrder.project_name + ' (Copy)',
+    rooms: newRooms,
+    pg: sourceOrder.pg ?? 3,
+    cf: sourceOrder.cf ?? 35,
+    show_cost: sourceOrder.show_cost ?? false,
+    notes: sourceOrder.notes || '',
+  };
+
+  const { data, error } = await supabase
+    .from('orders')
+    .insert(newOrder)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Duplicate order error:', error);
+    return null;
+  }
+  return data;
 }

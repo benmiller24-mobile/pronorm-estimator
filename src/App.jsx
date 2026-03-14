@@ -8,6 +8,23 @@ import {
 import { useAuth } from './AuthContext.jsx';
 import { useAutoSave } from './useAutoSave.js';
 
+// Inject responsive styles
+if (typeof document !== 'undefined' && !document.getElementById('app-responsive-style')) {
+  const style = document.createElement('style');
+  style.id = 'app-responsive-style';
+  style.textContent = `
+    @media(max-width:767px){
+      .app-layout{flex-direction:column!important}
+      .sidebar-panel{width:100%!important;min-width:auto!important;border-right:none!important;border-bottom:1px solid #e4e1dc!important;max-height:50vh;overflow-y:auto!important}
+      .main-panel{flex:1!important}
+      .items-table-wrap{overflow-x:auto!important}
+      .order-header-row{flex-wrap:wrap!important}
+      .mobile-catalog-toggle{display:inline-block!important}
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 /* ── Theme ── */
 const C = {
   bg: '#f7f6f3', card: '#fff', dark: '#191919', gold: '#b08d4c',
@@ -224,10 +241,13 @@ export default function App({ order, onBack }) {
   const [rooms, setRooms] = useState(initRooms);
   const [activeRoom, setActiveRoom] = useState(initRooms[0]?.id || 1);
   const [showCost, setShowCost] = useState(order?.show_cost ?? false);
+  const [orderNotes, setOrderNotes] = useState(order?.notes || '');
   const [showSpecial, setShowSpecial] = useState(false);
   const [scSearch, setScSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(null);
+  const [showCatalog, setShowCatalog] = useState(true);
   const listRef = useRef(null);
+  const dragIndexRef = useRef(null);
 
   // Auto-save hook
   const { save, saveStatus, lastSaved } = useAutoSave(user?.id, orderId);
@@ -237,8 +257,8 @@ export default function App({ order, onBack }) {
   useEffect(() => {
     // Skip initial mount
     if (saveVersion.current === 0) { saveVersion.current = 1; return; }
-    save({ projectName, rooms, pg, cf, showCost });
-  }, [projectName, rooms, pg, cf, showCost, save]);
+    save({ projectName, rooms, pg, cf, showCost, orderNotes });
+  }, [projectName, rooms, pg, cf, showCost, orderNotes, save]);
 
   useEffect(() => {
     setItems(parseData(RAW_DATA));
@@ -440,6 +460,34 @@ export default function App({ order, onBack }) {
     setRooms(rs => rs.map(r => r.id === id ? { ...r, name } : r));
   };
 
+  /* ── Drag-and-drop item reordering ── */
+  const handleDragStart = (e, index) => {
+    dragIndexRef.current = index;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e, dropIndex) => {
+    e.preventDefault();
+    const dragIndex = dragIndexRef.current;
+    if (dragIndex === null || dragIndex === dropIndex) {
+      dragIndexRef.current = null;
+      return;
+    }
+    setRooms(rs => rs.map(r => {
+      if (r.id !== activeRoom) return r;
+      const newItems = [...r.items];
+      const [draggedItem] = newItems.splice(dragIndex, 1);
+      newItems.splice(dropIndex, 0, draggedItem);
+      return { ...r, items: newItems };
+    }));
+    dragIndexRef.current = null;
+  };
+
   /* ── Helpers for per-m² items ── */
   const calcSqm = (item) => {
     const w = parseFloat(item.panelW) || 0;
@@ -520,10 +568,28 @@ export default function App({ order, onBack }) {
 
     const roomsHtml = rooms.map(r => {
       const rTotal = roomTotal(r);
-      return '<h2>' + r.name + '</h2><table><tr><th>SKU</th><th>Type</th><th>Hinge</th><th>Fin End</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>' + costTh + '</tr>' +
-        (r.items || []).map(buildItemRows).join('') +
-        '<tr class="total"><td colspan="6">Room Total</td><td class="r">' + fmtPts(rTotal) + '</td>' + costTd(rTotal) + '</tr></table>';
+      // Group items by catLabel
+      const grouped = {};
+      (r.items || []).forEach(item => {
+        const label = item.catLabel || 'Other';
+        if (!grouped[label]) grouped[label] = [];
+        grouped[label].push(item);
+      });
+
+      // Build table with group headers
+      let tableHtml = '<table><tr><th>SKU</th><th>Type</th><th>Hinge</th><th>Fin End</th><th class="r">Qty</th><th class="r">Unit Pts</th><th class="r">Total Pts</th>' + costTh + '</tr>';
+      Object.keys(grouped).sort().forEach(catLabel => {
+        tableHtml += '<tr class="group-header"><td colspan="' + (showCost ? 8 : 7) + '" style="background:#f7f6f3;font-weight:600;color:#b08d4c;padding:8px 10px;font-size:12px">' + catLabel + '</td></tr>';
+        grouped[catLabel].forEach(item => {
+          tableHtml += buildItemRows(item);
+        });
+      });
+      tableHtml += '<tr class="total"><td colspan="' + (showCost ? 6 : 6) + '">Room Total</td><td class="r">' + fmtPts(rTotal) + '</td>' + costTd(rTotal) + '</tr></table>';
+
+      return '<h2>' + r.name + '</h2>' + tableHtml;
     }).join('');
+
+    const notesHtml = orderNotes.trim() ? '<div style="margin-top:20px;padding:12px;background:#f7f6f3;border-left:3px solid #b08d4c"><div style="font-weight:600;color:#191919;margin-bottom:6px">Notes</div><div style="font-size:12px;color:#191919;white-space:pre-wrap">' + orderNotes.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div></div>' : '';
 
     const html = '<!DOCTYPE html><html><head><title>' + projectName + ' - Order</title>' +
       '<style>body{font-family:' + FONT + ';margin:40px;color:#191919}' +
@@ -534,10 +600,13 @@ export default function App({ order, onBack }) {
       'th{background:#f7f6f3;font-weight:600}' +
       '.r{text-align:right}.footer{margin-top:30px;font-size:11px;color:#8a8580}' +
       '.sc{color:#4a6fa5;font-size:12px}' +
-      '.total{font-weight:700;font-size:15px;border-top:2px solid #191919}</style></head><body>' +
+      '.total{font-weight:700;font-size:15px;border-top:2px solid #191919}' +
+      '.group-header{background:#faf9f7}</style></head><body>' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><div style="font-family:' + SERIF + ';font-size:24px;font-weight:400;color:#b08d4c">pronorm</div><div style="font-size:11px;font-weight:600;color:#b08d4c;background:rgba(176,141,76,.12);padding:3px 10px;border-radius:10px">Dealer Estimator</div></div>' +
       '<h1>' + projectName + '</h1>' +
-      '<div style="font-size:12px;color:#8a8580">PG: ' + PG_NAMES[pg] + ' · ' + new Date().toLocaleDateString() + '</div>' +
+      '<div style="font-size:12px;color:#8a8580;margin-bottom:12px">PG: ' + PG_NAMES[pg] + ' · ' + new Date().toLocaleDateString() + '</div>' +
       roomsHtml +
+      notesHtml +
       '<div style="margin-top:20px;padding-top:12px;border-top:2px solid #191919;font-size:16px;font-weight:700">' +
       'Grand Total: ' + fmtPts(grandTotal) + (showCost ? ' · ' + fmtCost(grandTotal, cf / 100) : '') +
       '</div>' +
@@ -570,9 +639,9 @@ export default function App({ order, onBack }) {
   };
 
   return (
-    <div style={s.app}>
+    <div style={s.app} className="app-layout">
       {/* ── Left Sidebar: Catalog ── */}
-      <div style={s.sidebar}>
+      <div style={{ ...s.sidebar, display: showCatalog ? 'flex' : 'none' }} className="sidebar-panel">
         {/* Header */}
         <div style={{ padding: '16px', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -716,12 +785,15 @@ export default function App({ order, onBack }) {
       </div>
 
       {/* ── Right Side: Room Builder ── */}
-      <div style={s.main}>
+      <div style={s.main} className="main-panel">
         {/* Top bar */}
-        <div style={s.header}>
+        <div style={s.header} className="order-header-row">
           {onBack && (
             <button style={{ ...s.btn, marginRight: 4 }} onClick={onBack}>← Orders</button>
           )}
+          <button style={{ ...s.btn, marginRight: 4, display: 'none' }} className="mobile-catalog-toggle" onClick={() => setShowCatalog(!showCatalog)} id="catalog-toggle-btn">
+            {showCatalog ? '✕ Catalog' : '☰ Catalog'}
+          </button>
           <input style={{ ...s.input, fontFamily: SERIF, fontSize: 18, fontWeight: 400, border: 'none', padding: '4px 0', flex: 1 }}
             value={projectName} onChange={e => setProjectName(e.target.value)} />
           {/* Save status indicator */}
@@ -763,6 +835,15 @@ export default function App({ order, onBack }) {
               value={room.name} onChange={e => renameRoom(room.id, e.target.value)} />
           </div>
 
+          {/* Order notes textarea (shown above items) */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: C.textSec, display: 'block', marginBottom: 6 }}>Order Notes</label>
+            <textarea style={{ ...s.input, width: '100%', minHeight: 60, fontFamily: FONT, padding: '10px', boxSizing: 'border-box', resize: 'vertical' }}
+              placeholder="Add notes about this order (optional)..."
+              value={orderNotes}
+              onChange={e => setOrderNotes(e.target.value)} />
+          </div>
+
           {/* Items */}
           {room.items.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 48, color: C.textTer }}>
@@ -770,7 +851,7 @@ export default function App({ order, onBack }) {
               <div style={{ fontSize: 12 }}>Click items in the catalog to add them here</div>
             </div>
           ) : (
-            <div style={s.roomCard}>
+            <div style={s.roomCard} className="items-table-wrap">
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: `2px solid ${C.border}` }}>
@@ -786,7 +867,7 @@ export default function App({ order, onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(room.items || []).map(item => {
+                  {(room.items || []).map((item, itemIndex) => {
                     const isSelected = item.id === selectedItemId;
                     const sqm = item.isSqm ? calcSqm(item) : 0;
                     const baseTotal = itemBaseTotal(item);
@@ -801,13 +882,19 @@ export default function App({ order, onBack }) {
 
                     return (
                     <React.Fragment key={item.id}>
-                    {/* ── Cabinet row (clickable to select) ── */}
+                    {/* ── Cabinet row (clickable to select, draggable) ── */}
                     <tr
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, itemIndex)}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, itemIndex)}
                       style={{
                         borderBottom: (item.isSqm || item.finEnd || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`,
                         background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent',
                         cursor: 'pointer',
                         borderLeft: selBorder,
+                        opacity: dragIndexRef.current === itemIndex ? 0.5 : 1,
+                        transition: 'opacity 0.2s',
                       }}
                       onClick={() => setSelectedItemId(isSelected ? null : item.id)}
                     >

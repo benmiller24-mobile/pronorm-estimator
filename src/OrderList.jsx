@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './AuthContext.jsx';
-import { loadOrders, createOrder, deleteOrder } from './useAutoSave.js';
+import { loadOrders, createOrder, deleteOrder, duplicateOrder } from './useAutoSave.js';
 
 const FONT = "'DM Sans',system-ui,sans-serif";
 const SERIF = "'Cormorant Garamond','Georgia',serif";
@@ -23,6 +23,8 @@ export default function OrderList({ onOpenOrder }) {
   const { user, profile, signOut, isAdmin } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('newest');
 
   const s = {
     btn: { border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 16px', fontSize: 12, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', background: C.card, color: C.textPri },
@@ -51,6 +53,13 @@ export default function OrderList({ onOpenOrder }) {
     fetchOrders();
   }
 
+  async function handleDuplicate(order) {
+    const newOrder = await duplicateOrder(order, user.id);
+    if (newOrder) {
+      fetchOrders();
+    }
+  }
+
   const fmtDate = (d) => new Date(d).toLocaleDateString('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
@@ -65,6 +74,27 @@ export default function OrderList({ onOpenOrder }) {
       }, 0);
     }, 0);
   };
+
+  // Filter and sort orders
+  const filteredOrders = orders.filter(o =>
+    o.project_name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const sortedOrders = [...filteredOrders].sort((a, b) => {
+    switch (sortBy) {
+      case 'oldest':
+        return new Date(a.updated_at || 0) - new Date(b.updated_at || 0);
+      case 'name-asc':
+        return (a.project_name || '').localeCompare(b.project_name || '');
+      case 'name-desc':
+        return (b.project_name || '').localeCompare(a.project_name || '');
+      case 'most-items':
+        return countItems(b.rooms) - countItems(a.rooms);
+      case 'newest':
+      default:
+        return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+    }
+  });
 
   return (
     <div style={{ minHeight: '100vh', fontFamily: FONT, background: C.bg, color: C.textPri }}>
@@ -97,6 +127,28 @@ export default function OrderList({ onOpenOrder }) {
           <button style={s.btnGold} onClick={handleNew}>+ New Order</button>
         </div>
 
+        {orders.length > 0 && (
+          <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+            <input
+              style={{ ...s.btn, flex: 1, minWidth: 200, border: `1px solid ${C.border}`, padding: '8px 12px', textAlign: 'left' }}
+              placeholder="Search by project name..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+            <select
+              style={{ ...s.btn, padding: '8px 12px', border: `1px solid ${C.border}` }}
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+              <option value="most-items">Most Items</option>
+            </select>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ padding: 48, textAlign: 'center', color: C.textTer }}>Loading orders...</div>
         ) : orders.length === 0 ? (
@@ -108,9 +160,17 @@ export default function OrderList({ onOpenOrder }) {
             <div style={{ fontSize: 13, color: C.textTer, marginBottom: 20 }}>Create your first order to get started</div>
             <button style={s.btnGold} onClick={handleNew}>+ New Order</button>
           </div>
+        ) : filteredOrders.length === 0 ? (
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+            padding: 48, textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 16, color: C.textSec, marginBottom: 8 }}>No orders match your search</div>
+            <div style={{ fontSize: 13, color: C.textTer }}>Try adjusting your filters</div>
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {orders.map(o => {
+            {sortedOrders.map(o => {
               const roomCount = Array.isArray(o.rooms) ? o.rooms.length : 0;
               const itemCount = countItems(o.rooms);
               return (
@@ -133,6 +193,12 @@ export default function OrderList({ onOpenOrder }) {
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 12, color: C.textSec }}>{o.updated_at ? fmtDate(o.updated_at) : 'Never saved'}</div>
                   </div>
+                  <button
+                    style={{ ...s.btn, fontSize: 11, padding: '4px 10px', marginRight: 6 }}
+                    onClick={(e) => { e.stopPropagation(); handleDuplicate(o); }}
+                  >
+                    Duplicate
+                  </button>
                   <button
                     style={{ ...s.btn, color: C.danger, borderColor: C.danger, fontSize: 11, padding: '4px 10px' }}
                     onClick={(e) => { e.stopPropagation(); handleDelete(o.id); }}
