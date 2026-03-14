@@ -131,10 +131,45 @@ export default function App({ order, onBack }) {
   const { user, profile, signOut } = useAuth();
   const orderId = order?.id;
 
+  // Build SKU lookup for hydrating loaded items
+  const skuLookup = useMemo(() => {
+    const catalog = parseData(RAW_DATA);
+    const map = {};
+    catalog.forEach(item => { map[item.sku] = item; });
+    return map;
+  }, []);
+
+  // Hydrate loaded items: ensure cat, catLabel, line are present from catalog
+  function hydrateRooms(rawRooms) {
+    if (!Array.isArray(rawRooms) || rawRooms.length === 0) {
+      return [{ id: Date.now(), name: 'Kitchen', items: [] }];
+    }
+    return rawRooms.map(room => ({
+      ...room,
+      items: (room.items || []).map(item => {
+        // If catLabel is already set, no need to hydrate
+        if (item.catLabel) return item;
+        // Look up from catalog by SKU
+        const catalogEntry = skuLookup[item.sku];
+        if (catalogEntry) {
+          return {
+            ...item,
+            cat: item.cat || catalogEntry.cat,
+            catLabel: catalogEntry.catLabel,
+            line: item.line || catalogEntry.line,
+          };
+        }
+        // Fallback: try to derive from cat field
+        if (item.cat) {
+          return { ...item, catLabel: CATEGORY_LABELS[item.cat] || item.cat };
+        }
+        return { ...item, catLabel: 'Unknown' };
+      }),
+    }));
+  }
+
   // Initialize state from saved order data or defaults
-  const initRooms = order?.rooms && Array.isArray(order.rooms) && order.rooms.length > 0
-    ? order.rooms
-    : [{ id: Date.now(), name: 'Kitchen', items: [] }];
+  const initRooms = hydrateRooms(order?.rooms);
 
   const [items, setItems] = useState([]);
   const [specialItems, setSpecialItems] = useState([]);
