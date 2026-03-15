@@ -783,9 +783,9 @@ Return ONLY the JSON array, no other text.`;
         {/* Results Table */}
         {detectedItems.length > 0 && (
           <div style={s.section}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Detected Items</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Detected Items — Review & Refine</h2>
             <p style={{ fontSize: 12, color: C.textSec, marginBottom: 16 }}>
-              Review and adjust suggested SKUs. Use the dropdown to change any incorrect matches.
+              Adjust type, width, height, and SKU for each detected item. Use "Add Item" for anything the AI missed.
             </p>
             <div style={{ overflowX: 'auto' }}>
               <table style={s.table}>
@@ -794,105 +794,178 @@ Return ONLY the JSON array, no other text.`;
                     <th style={s.th}>✓</th>
                     <th style={s.th}>Pos</th>
                     <th style={s.th}>Description</th>
-                    <th style={s.th}>W (cm)</th>
                     <th style={s.th}>Type</th>
+                    <th style={s.th}>W (cm)</th>
+                    <th style={s.th}>H (cm)</th>
                     <th style={s.th}>Qty</th>
-                    <th style={s.th}>Conf.</th>
-                    <th style={s.th}>Suggested SKU</th>
+                    <th style={s.th}>SKU</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {detectedItems.map((item, idx) => (
-                    <tr key={idx} style={{ background: itemSelections[idx]?.included ? 'transparent' : '#fafafa' }}>
-                      <td style={s.td}>
-                        <input
-                          type="checkbox"
-                          checked={itemSelections[idx]?.included ?? true}
-                          onChange={(e) => setItemSelections({
-                            ...itemSelections,
-                            [idx]: { ...itemSelections[idx], included: e.target.checked }
-                          })}
-                        />
-                      </td>
-                      <td style={s.td}>{item.position || '—'}</td>
-                      <td style={{ ...s.td, maxWidth: 250 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{item.description}</div>
-                        {item.notes && <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>{item.notes}</div>}
-                      </td>
-                      <td style={s.td}>{item.width_cm || '—'}</td>
-                      <td style={s.td}>
-                        <span style={{
-                          padding: '2px 6px', borderRadius: 3, fontSize: 11, fontWeight: 500,
-                          background: C.goldMuted, color: C.gold
-                        }}>{item.type}</span>
-                      </td>
-                      <td style={s.td}>
-                        <input
-                          type="number"
-                          min="1"
-                          max="20"
-                          value={itemSelections[idx]?.qty || 1}
-                          onChange={(e) => setItemSelections({
-                            ...itemSelections,
-                            [idx]: { ...itemSelections[idx], qty: Math.max(1, +e.target.value) }
-                          })}
-                          style={{ width: 44, padding: '3px 4px', fontSize: 12, textAlign: 'center', border: `1px solid ${C.border}`, borderRadius: 4 }}
-                        />
-                      </td>
-                      <td style={s.td}>
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: 4,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          background: item.confidence === 'high' ? '#e8f5e9' : item.confidence === 'medium' ? '#fff3e0' : '#ffebee',
-                          color: item.confidence === 'high' ? '#2e7d32' : item.confidence === 'medium' ? '#f57c00' : '#c62828'
-                        }}>
-                          {item.confidence}
-                        </span>
-                      </td>
-                      <td style={s.td}>
-                        <select
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: 12,
-                            border: `1px solid ${itemSelections[idx]?.sku ? C.border : C.danger}`,
-                            borderRadius: 4,
-                            background: C.card,
-                            minWidth: 180,
-                          }}
-                          value={itemSelections[idx]?.sku || ''}
-                          onChange={(e) => setItemSelections({
-                            ...itemSelections,
-                            [idx]: { ...itemSelections[idx], sku: e.target.value }
-                          })}
-                        >
-                          <option value="">— Select SKU —</option>
-                          {item.suggestedSku && !item.alternatives?.find(a => a.sku === item.suggestedSku) && (
-                            <option value={item.suggestedSku}>{item.suggestedSku} ★ suggested</option>
-                          )}
-                          {item.alternatives?.map((alt) => (
-                            <option key={alt.sku} value={alt.sku}>
-                              {alt.sku}{alt.sku === item.suggestedSku ? ' ★' : ''} · {alt.catLabel} · {alt.width || 0}cm
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
+                  {detectedItems.map((item, idx) => {
+                    const sel = itemSelections[idx] || {};
+                    const currentType = sel.type || item.type || 'base';
+                    const currentWidth = sel.width || item.width_cm || 60;
+                    const currentHeight = sel.height || item.height_cm || 76;
+
+                    // Build filtered SKU options based on current type/width/height
+                    const typePrefix = {
+                      base: 'UX', sink: 'USX', corner_base: 'UEX', larder: 'UVX',
+                      wall: 'OX', corner_wall: 'OEX', tall: 'ST', panel: 'WS',
+                      filler: 'PUX', tall_filler: 'PHX', wall_filler: 'POEX', housing: 'HGPX', plinth: 'SB'
+                    }[currentType] || '';
+
+                    const filteredSkus = parsedCatalog
+                      ? parsedCatalog.filter(c => {
+                          if (!typePrefix) return true;
+                          if (typePrefix === 'SB') return c.sku.startsWith('SB ');
+                          if (typePrefix === 'WS') return c.sku.startsWith('WS ');
+                          if (typePrefix === 'ST') return c.sku.startsWith('ST ');
+                          return c.sku.startsWith(typePrefix + ' ');
+                        })
+                        .sort((a, b) => {
+                          // Sort by width match, then SKU name
+                          const aDiff = Math.abs((a.width || 0) - currentWidth);
+                          const bDiff = Math.abs((b.width || 0) - currentWidth);
+                          return aDiff - bDiff || a.sku.localeCompare(b.sku);
+                        })
+                        .slice(0, 60)
+                      : [];
+
+                    return (
+                      <tr key={idx} style={{ background: sel.included === false ? '#fafafa' : 'transparent' }}>
+                        <td style={s.td}>
+                          <input type="checkbox" checked={sel.included !== false}
+                            onChange={(e) => setItemSelections({ ...itemSelections, [idx]: { ...sel, included: e.target.checked } })} />
+                        </td>
+                        <td style={{ ...s.td, fontSize: 12, color: C.textSec }}>{item.position || '—'}</td>
+                        <td style={{ ...s.td, maxWidth: 200 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500 }}>{item.description}</div>
+                          {item.notes && <div style={{ fontSize: 10, color: C.textSec, marginTop: 1 }}>{item.notes}</div>}
+                        </td>
+                        <td style={s.td}>
+                          <select style={{ padding: '3px 4px', fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 4, minWidth: 90 }}
+                            value={currentType}
+                            onChange={(e) => {
+                              const newType = e.target.value;
+                              // Auto-pick first matching SKU for new type
+                              const prefix = { base:'UX',sink:'USX',corner_base:'UEX',larder:'UVX',wall:'OX',corner_wall:'OEX',tall:'ST',panel:'WS',filler:'PUX',tall_filler:'PHX',wall_filler:'POEX',housing:'HGPX',plinth:'SB' }[newType] || '';
+                              const match = parsedCatalog?.find(c => c.sku.startsWith(prefix + ' ') && Math.abs((c.width||0) - currentWidth) <= 10);
+                              setItemSelections({ ...itemSelections, [idx]: { ...sel, type: newType, sku: match?.sku || sel.sku } });
+                            }}>
+                            <option value="base">Base (UX)</option>
+                            <option value="sink">Sink (USX)</option>
+                            <option value="corner_base">Corner Base (UEX)</option>
+                            <option value="larder">Larder (UVX)</option>
+                            <option value="wall">Wall (OX)</option>
+                            <option value="corner_wall">Corner Wall (OEX)</option>
+                            <option value="tall">Tall (ST)</option>
+                            <option value="panel">Side Panel (WS)</option>
+                            <option value="filler">Filler (PUX)</option>
+                            <option value="tall_filler">Tall Filler (PHX)</option>
+                            <option value="wall_filler">Wall Filler (POEX)</option>
+                            <option value="housing">Housing (HGPX)</option>
+                            <option value="plinth">Plinth (SB)</option>
+                          </select>
+                        </td>
+                        <td style={s.td}>
+                          <select style={{ padding: '3px 4px', fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 4, width: 56 }}
+                            value={currentWidth}
+                            onChange={(e) => {
+                              const w = +e.target.value;
+                              const match = parsedCatalog?.find(c => c.sku.startsWith((typePrefix || 'UX') + ' ') && c.width === w);
+                              setItemSelections({ ...itemSelections, [idx]: { ...sel, width: w, sku: match?.sku || sel.sku } });
+                            }}>
+                            {[20,23,25,30,40,45,50,60,70,80,81,90,100,110,120].map(w => (
+                              <option key={w} value={w}>{w}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={s.td}>
+                          <select style={{ padding: '3px 4px', fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 4, width: 56 }}
+                            value={currentHeight}
+                            onChange={(e) => setItemSelections({ ...itemSelections, [idx]: { ...sel, height: +e.target.value } })}>
+                            {[51,76,89,144,227].map(h => (
+                              <option key={h} value={h}>{h}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={s.td}>
+                          <input type="number" min="1" max="20" value={sel.qty || 1}
+                            onChange={(e) => setItemSelections({ ...itemSelections, [idx]: { ...sel, qty: Math.max(1, +e.target.value) } })}
+                            style={{ width: 40, padding: '3px 4px', fontSize: 11, textAlign: 'center', border: `1px solid ${C.border}`, borderRadius: 4 }} />
+                        </td>
+                        <td style={s.td}>
+                          <select style={{ padding: '3px 6px', fontSize: 11, border: `1px solid ${sel.sku ? C.border : C.danger}`, borderRadius: 4, minWidth: 160 }}
+                            value={sel.sku || ''}
+                            onChange={(e) => setItemSelections({ ...itemSelections, [idx]: { ...sel, sku: e.target.value } })}>
+                            <option value="">— Select —</option>
+                            {item.suggestedSku && !filteredSkus.find(a => a.sku === item.suggestedSku) && (
+                              <option value={item.suggestedSku}>{item.suggestedSku} ★</option>
+                            )}
+                            {filteredSkus.map((alt) => (
+                              <option key={alt.sku} value={alt.sku}>
+                                {alt.sku}{alt.sku === item.suggestedSku ? ' ★' : ''} ({alt.width}cm)
+                              </option>
+                            ))}
+                          </select>
+                          <button style={{ marginLeft: 4, padding: '2px 6px', fontSize: 10, cursor: 'pointer', border: `1px solid ${C.border}`, borderRadius: 3, background: '#fff3f3', color: C.danger }}
+                            title="Remove this item"
+                            onClick={() => {
+                              const newItems = detectedItems.filter((_, i) => i !== idx);
+                              const newSel = {};
+                              newItems.forEach((_, i) => {
+                                const oldIdx = i >= idx ? i + 1 : i;
+                                newSel[i] = itemSelections[oldIdx] || { sku: newItems[i].suggestedSku, included: true, qty: 1 };
+                              });
+                              setDetectedItems(newItems);
+                              setItemSelections(newSel);
+                            }}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
+            {/* Add Item button */}
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button style={{ ...s.button, fontSize: 12, padding: '6px 14px' }}
+                onClick={() => {
+                  const newItem = { position: null, description: 'Manually added item', width_cm: 60, height_cm: 76, type: 'base', suggested_sku: '', suggestedSku: '', confidence: 'manual', notes: 'Added by designer', alternatives: parsedCatalog?.filter(c => c.cat?.startsWith('Base-')).slice(0, 40) || [] };
+                  setDetectedItems([...detectedItems, newItem]);
+                  setItemSelections({ ...itemSelections, [detectedItems.length]: { sku: '', included: true, qty: 1, type: 'base', width: 60, height: 76 } });
+                }}>+ Add Base Unit</button>
+              <button style={{ ...s.button, fontSize: 12, padding: '6px 14px' }}
+                onClick={() => {
+                  const newItem = { position: null, description: 'Wall unit (added)', width_cm: 40, height_cm: 89, type: 'wall', suggested_sku: '', suggestedSku: '', confidence: 'manual', notes: 'Added by designer', alternatives: parsedCatalog?.filter(c => c.cat?.startsWith('Wall')).slice(0, 40) || [] };
+                  setDetectedItems([...detectedItems, newItem]);
+                  setItemSelections({ ...itemSelections, [detectedItems.length]: { sku: '', included: true, qty: 1, type: 'wall', width: 40, height: 89 } });
+                }}>+ Add Wall Unit</button>
+              <button style={{ ...s.button, fontSize: 12, padding: '6px 14px' }}
+                onClick={() => {
+                  const newItem = { position: null, description: 'Side panel (added)', width_cm: 25, height_cm: 0, type: 'panel', suggested_sku: 'WS 25-00-02', suggestedSku: 'WS 25-00-02', confidence: 'manual', notes: 'Added by designer', alternatives: parsedCatalog?.filter(c => c.cat === 'Panel').slice(0, 40) || [] };
+                  setDetectedItems([...detectedItems, newItem]);
+                  const wsMatch = parsedCatalog?.find(c => c.sku === 'WS 25-00-02');
+                  setItemSelections({ ...itemSelections, [detectedItems.length]: { sku: wsMatch?.sku || 'WS 25-00-02', included: true, qty: 1, type: 'panel', width: 25 } });
+                }}>+ Add Side Panel</button>
+              <button style={{ ...s.button, fontSize: 12, padding: '6px 14px' }}
+                onClick={() => {
+                  const newItem = { position: null, description: 'Filler panel (added)', width_cm: 20, height_cm: 76, type: 'filler', suggested_sku: 'PUX 20-76', suggestedSku: 'PUX 20-76', confidence: 'manual', notes: 'Added by designer', alternatives: parsedCatalog?.filter(c => c.cat === 'Filler' || c.sku.startsWith('PUX ') || c.sku.startsWith('PHX ')).slice(0, 40) || [] };
+                  setDetectedItems([...detectedItems, newItem]);
+                  const puxMatch = parsedCatalog?.find(c => c.sku === 'PUX 20-76');
+                  setItemSelections({ ...itemSelections, [detectedItems.length]: { sku: puxMatch?.sku || 'PUX 20-76', included: true, qty: 1, type: 'filler', width: 20, height: 76 } });
+                }}>+ Add Filler</button>
+            </div>
+
             <div style={s.note}>
-              <strong>Tip:</strong> Adjust quantities and SKU selections as needed before creating the order.
-              Items with pull-out drawers typically use variant -38 (full pull-out) or -37 (pull-out + drawer).
-              Bottle units use -41. Standard shelf units use -01.
+              <strong>How to refine:</strong> Change the <em>Type</em> dropdown to switch between base/wall/sink/corner units — the SKU list will auto-filter. Adjust <em>Width</em> and <em>Height</em> to narrow options further. Use <em>Qty</em> for duplicates. Click ✕ to remove incorrect detections.
             </div>
 
             <div style={{ marginTop: 24, display: 'flex', gap: 12 }}>
               <button style={s.buttonPrimary} onClick={handleCreateOrder} disabled={loading}>
-                {loading ? <span style={s.spinner} /> : 'Create Order'}
+                {loading ? <span style={s.spinner} /> : `Create Order (${Object.values(itemSelections).filter(s => s.included !== false && s.sku).reduce((sum, s) => sum + (s.qty || 1), 0)} items)`}
               </button>
               <button style={s.button} onClick={() => { setDetectedItems([]); setItemSelections({}); setAnalysisLog(''); }}>
                 Start Over
