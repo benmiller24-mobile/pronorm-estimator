@@ -316,7 +316,16 @@ Look at the BOTTOM of the elevation drawing. There will be dimension lines with 
 The drawing will have numbered circles/labels (1, 2, 3...) on the cabinets. Map each number to its width from the dimension line.
 
 ### Step 4: Identify what each cabinet IS
-- If it shows a wine cooler, fridge, oven, or dishwasher → it's an APPLIANCE, NOT a Pronorm cabinet. SKIP IT. Do not include appliances in the output.
+⚠️ APPLIANCE CHECK (DO THIS FIRST FOR EVERY POSITION):
+Look at what is INSIDE the cabinet at each position. If you see ANY of these, it is an APPLIANCE — SKIP IT COMPLETELY, do NOT output it:
+- Wine cooler / wine fridge (look for bottles on shelves, dark glass door, cooling unit)
+- Built-in oven or microwave
+- Dishwasher
+- Fridge or freezer
+- Any position that shows an appliance graphic/rendering rather than cabinet doors
+Appliances are NOT Pronorm furniture items. They are bought separately. DO NOT include them.
+
+For actual CABINETS:
 - If it's a wide unit (90cm) with horizontal bars/grooves → pull-out unit, use variant -38
 - If it's a 60cm unit with horizontal bars/grooves → pull-out unit, use variant -37 (this is the standard 60cm pull-out)
 - If it's a narrow unit (30cm) → most likely a bottle unit (-41) or larder pull-out (UVX prefix with -41)
@@ -346,7 +355,7 @@ The drawing will have numbered circles/labels (1, 2, 3...) on the cabinets. Map 
 
 ## CRITICAL RULES
 1. Read the dimension lines CAREFULLY. Each dimension corresponds to one cabinet width.
-2. Do NOT include appliances (wine cooler, fridge, oven, dishwasher) as Pronorm items.
+2. NEVER include appliances. If a position shows a wine cooler (bottles visible, dark glass, shelving for wine), oven, fridge, or dishwasher — SKIP that position entirely. This is the #1 most common mistake.
 3. ALWAYS use height code 76 for base units.
 4. For 90cm base → variant -38. For 60cm base → variant -37. For 30cm base → variant -41.
 5. The last 30cm unit before the filler is typically UVX 30-76-41 (larder), not UX.
