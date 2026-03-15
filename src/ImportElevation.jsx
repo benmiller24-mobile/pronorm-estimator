@@ -454,14 +454,26 @@ Return ONLY the JSON array, no other text.`;
       });
 
       // ── Post-processing: fix known detection gaps ──
-      const postProcessed = [...enrichedItems];
+      // 0. Remove wine cooler / appliance false positives
+      //    Claude sometimes detects appliances as cabinets despite being told to skip them.
+      //    Filter out any item whose notes/description mention wine, cooler, appliance, oven, fridge, dishwasher
+      const appliancePattern = /wine|cooler|appliance|oven|fridge|freezer|dishwasher|microwave/i;
+      const filteredItems = enrichedItems.filter(item => {
+        const text = `${item.description || ''} ${item.notes || ''} ${item.variant_hint || ''}`;
+        if (appliancePattern.test(text)) {
+          console.log(`Post-processing: Removing appliance false positive: ${item.suggested_sku || item.suggestedSku} (${item.description})`);
+          return false;
+        }
+        return true;
+      });
+      const postProcessed = [...filteredItems];
 
       // Helper to check if a SKU pattern exists in the list
       const hasSku = (pattern) => postProcessed.some(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern));
       const countSku = (pattern) => postProcessed.filter(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern)).length;
 
-      // 1. Ensure UVX 30-76-41 (larder) exists: if we have 3+ items with UX 30-76-41 but no UVX, convert the last one
-      if (!hasSku('UVX') && countSku('UX30-76-41') >= 3) {
+      // 1. Ensure UVX 30-76-41 (larder) exists: if we have 2+ items with UX 30-76-41 but no UVX, convert the last one
+      if (!hasSku('UVX') && countSku('UX30-76-41') >= 2) {
         // Find the last UX 30-76-41 and convert it to UVX
         for (let i = postProcessed.length - 1; i >= 0; i--) {
           if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
@@ -491,28 +503,12 @@ Return ONLY the JSON array, no other text.`;
         }
       }
 
-      // 3. Ensure UVX 30-76-41 exists even if only 2 UX 30-76-41s: if there are 2+ UX 30-76-41 and no UVX, convert last one
-      if (!hasSku('UVX')) {
-        const ux30Count = countSku('UX30-76-41');
-        if (ux30Count >= 2) {
-          for (let i = postProcessed.length - 1; i >= 0; i--) {
-            if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
-              const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
-              if (uvxMatch) {
-                postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
-              }
-              break;
-            }
-          }
-        }
-      }
-
       setDetectedItems(postProcessed);
       setAnalysisLog(`Analysis complete. ${postProcessed.length} items detected and matched.`);
 
-      // Initialize selections with suggested SKUs
+      // Initialize selections with suggested SKUs (use postProcessed, not enrichedItems!)
       const selections = {};
-      enrichedItems.forEach((item, idx) => {
+      postProcessed.forEach((item, idx) => {
         selections[idx] = { sku: item.suggestedSku, included: true, qty: item.quantity || 1 };
       });
       setItemSelections(selections);
