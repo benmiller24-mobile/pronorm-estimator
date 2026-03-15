@@ -4,13 +4,14 @@ import LoginPage from './LoginPage.jsx';
 import OrderList from './OrderList.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import App from './App.jsx';
+import ImportElevation from './ImportElevation.jsx';
 
 const FONT = "'DM Sans',system-ui,sans-serif";
 
 export default function AppShell() {
   const { user, profile, loading } = useAuth();
   const [currentOrder, setCurrentOrder] = useState(null); // null = order list, '__admin__' = admin, {order} = estimator
-  const [view, setView] = useState('list'); // list | estimator | admin
+  const [view, setView] = useState('list'); // list | estimator | admin | import
 
   if (loading) {
     return (
@@ -45,6 +46,19 @@ export default function AppShell() {
     );
   }
 
+  // Import elevation
+  if (view === 'import') {
+    return (
+      <ImportElevation
+        onBack={() => setView('list')}
+        onOrderCreated={(order) => {
+          setCurrentOrder(order);
+          setView('estimator');
+        }}
+      />
+    );
+  }
+
   // Estimator (with an order loaded)
   if (view === 'estimator' && currentOrder) {
     return (
@@ -69,6 +83,7 @@ export default function AppShell() {
           setView('estimator');
         }
       }}
+      onImportElevation={() => setView('import')}
     />
   );
 }

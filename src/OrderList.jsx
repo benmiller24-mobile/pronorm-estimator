@@ -19,7 +19,7 @@ const C = {
   success: '#3d7a4f', danger: '#c24040', accent: '#4a6fa5',
 };
 
-export default function OrderList({ onOpenOrder }) {
+export default function OrderList({ onOpenOrder, onImportElevation }) {
   const { user, profile, signOut, isAdmin } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -124,7 +124,12 @@ export default function OrderList({ onOpenOrder }) {
             <div style={{ fontSize: 20, fontWeight: 600 }}>My Orders</div>
             <div style={{ fontSize: 12, color: C.textSec, marginTop: 2 }}>{orders.length} order{orders.length !== 1 ? 's' : ''}</div>
           </div>
-          <button style={s.btnGold} onClick={handleNew}>+ New Order</button>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {onImportElevation && (
+              <button style={s.btn} onClick={onImportElevation}>📷 Import Elevation</button>
+            )}
+            <button style={s.btnGold} onClick={handleNew}>+ New Order</button>
+          </div>
         </div>
 
         {orders.length > 0 && (

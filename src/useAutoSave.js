@@ -29,6 +29,11 @@ export function useAutoSave(userId, orderId) {
         cf: orderData.cf,
         show_cost: orderData.showCost,
         notes: orderData.orderNotes || '',
+        client_name: orderData.clientName || '',
+        client_email: orderData.clientEmail || '',
+        client_phone: orderData.clientPhone || '',
+        client_address: orderData.clientAddress || '',
+        order_ref: orderData.orderRef || '',
         updated_at: new Date().toISOString(),
       };
 
@@ -105,6 +110,11 @@ export async function createOrder(userId, projectName = 'New Kitchen Project') {
     pg: 3,
     cf: 35,
     show_cost: false,
+    client_name: '',
+    client_email: '',
+    client_phone: '',
+    client_address: '',
+    order_ref: '',
   };
 
   const { data, error } = await supabase
@@ -164,6 +174,11 @@ export async function duplicateOrder(sourceOrder, userId) {
     cf: sourceOrder.cf ?? 35,
     show_cost: sourceOrder.show_cost ?? false,
     notes: sourceOrder.notes || '',
+    client_name: sourceOrder.client_name || '',
+    client_email: sourceOrder.client_email || '',
+    client_phone: sourceOrder.client_phone || '',
+    client_address: sourceOrder.client_address || '',
+    order_ref: sourceOrder.order_ref || '',
   };
 
   const { data, error } = await supabase

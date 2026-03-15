@@ -242,6 +242,12 @@ export default function App({ order, onBack }) {
   const [activeRoom, setActiveRoom] = useState(initRooms[0]?.id || 1);
   const [showCost, setShowCost] = useState(order?.show_cost ?? false);
   const [orderNotes, setOrderNotes] = useState(order?.notes || '');
+  const [clientName, setClientName] = useState(order?.client_name || '');
+  const [clientEmail, setClientEmail] = useState(order?.client_email || '');
+  const [clientPhone, setClientPhone] = useState(order?.client_phone || '');
+  const [clientAddress, setClientAddress] = useState(order?.client_address || '');
+  const [orderRef, setOrderRef] = useState(order?.order_ref || '');
+  const [projectDetailsOpen, setProjectDetailsOpen] = useState(false);
   const [showSpecial, setShowSpecial] = useState(false);
   const [scSearch, setScSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -259,8 +265,8 @@ export default function App({ order, onBack }) {
   useEffect(() => {
     // Skip initial mount
     if (saveVersion.current === 0) { saveVersion.current = 1; return; }
-    save({ projectName, rooms, pg, cf, showCost, orderNotes });
-  }, [projectName, rooms, pg, cf, showCost, orderNotes, save]);
+    save({ projectName, rooms, pg, cf, showCost, orderNotes, clientName, clientEmail, clientPhone, clientAddress, orderRef });
+  }, [projectName, rooms, pg, cf, showCost, orderNotes, clientName, clientEmail, clientPhone, clientAddress, orderRef, save]);
 
   useEffect(() => {
     setItems(parseData(RAW_DATA));
@@ -636,6 +642,23 @@ export default function App({ order, onBack }) {
 
     const notesHtml = orderNotes.trim() ? '<div style="margin-top:20px;padding:12px;background:#f7f6f3;border-left:3px solid #b08d4c"><div style="font-weight:600;color:#191919;margin-bottom:6px">Notes</div><div style="font-size:12px;color:#191919;white-space:pre-wrap">' + orderNotes.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div></div>' : '';
 
+    // Build client info section for PDF
+    const clientInfoLines = [];
+    if (clientName || clientEmail || clientPhone) {
+      const parts = [];
+      if (clientName) parts.push(clientName);
+      if (clientEmail) parts.push(clientEmail);
+      if (clientPhone) parts.push(clientPhone);
+      clientInfoLines.push(parts.join(' · '));
+    }
+    if (clientAddress) {
+      clientInfoLines.push('Address: ' + clientAddress);
+    }
+    if (orderRef) {
+      clientInfoLines.push('Ref: ' + orderRef);
+    }
+    const clientHtml = clientInfoLines.length > 0 ? '<div style="font-size:12px;color:#8a8580;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #e4e1dc">' + clientInfoLines.map(line => '<div>' + line + '</div>').join('') + '</div>' : '';
+
     const html = '<!DOCTYPE html><html><head><title>' + projectName + ' - Order</title>' +
       '<style>body{font-family:' + FONT + ';margin:40px;color:#191919}' +
       'h1{font-family:' + SERIF + ';font-weight:400;font-size:28px;margin-bottom:4px}' +
@@ -649,6 +672,7 @@ export default function App({ order, onBack }) {
       '.group-header{background:#faf9f7}</style></head><body>' +
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><div style="font-family:' + SERIF + ';font-size:24px;font-weight:400;color:#b08d4c">pronorm</div><div style="font-size:11px;font-weight:600;color:#b08d4c;background:rgba(176,141,76,.12);padding:3px 10px;border-radius:10px">Dealer Estimator</div></div>' +
       '<h1>' + projectName + '</h1>' +
+      clientHtml +
       '<div style="font-size:12px;color:#8a8580;margin-bottom:12px">PG: ' + PG_NAMES[pg] + ' · ' + new Date().toLocaleDateString() + '</div>' +
       roomsHtml +
       notesHtml +
@@ -878,6 +902,66 @@ export default function App({ order, onBack }) {
           <div style={{ marginBottom: 12 }}>
             <input style={{ ...s.input, fontWeight: 600, fontSize: 14, width: 200 }}
               value={room.name} onChange={e => renameRoom(room.id, e.target.value)} />
+          </div>
+
+          {/* Project Details (collapsible) */}
+          <div style={{ marginBottom: 16, border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
+            <button
+              style={{
+                width: '100%',
+                padding: 12,
+                background: C.bg,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: 12,
+                fontWeight: 600,
+                color: C.textSec,
+              }}
+              onClick={() => setProjectDetailsOpen(!projectDetailsOpen)}
+            >
+              <span>Project Details</span>
+              <span>{projectDetailsOpen ? '▼' : '▶'}</span>
+            </button>
+            {!projectDetailsOpen && (
+              <div style={{ padding: '8px 12px', fontSize: 12, color: C.textSec, background: C.card }}>
+                {clientName || orderRef ? (
+                  <span>
+                    {clientName && `Client: ${clientName}`}
+                    {clientName && orderRef && ' · '}
+                    {orderRef && `Ref: ${orderRef}`}
+                  </span>
+                ) : (
+                  <span style={{ color: C.textTer }}>No details</span>
+                )}
+              </div>
+            )}
+            {projectDetailsOpen && (
+              <div style={{ padding: 12, background: C.card, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: C.textSec, display: 'block', marginBottom: 4 }}>Client Name</label>
+                  <input style={s.input} placeholder="e.g., John Smith" value={clientName} onChange={e => setClientName(e.target.value)} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: C.textSec, display: 'block', marginBottom: 4 }}>Email</label>
+                  <input style={s.input} placeholder="e.g., john@example.com" value={clientEmail} onChange={e => setClientEmail(e.target.value)} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: C.textSec, display: 'block', marginBottom: 4 }}>Phone</label>
+                  <input style={s.input} placeholder="e.g., +44 123 456 7890" value={clientPhone} onChange={e => setClientPhone(e.target.value)} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: C.textSec, display: 'block', marginBottom: 4 }}>Address</label>
+                  <input style={s.input} placeholder="e.g., 123 High Street, London" value={clientAddress} onChange={e => setClientAddress(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: C.textSec, display: 'block', marginBottom: 4 }}>Order Reference</label>
+                  <input style={s.input} placeholder="e.g., KIT-2024-001" value={orderRef} onChange={e => setOrderRef(e.target.value)} />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Order notes textarea (shown above items) */}
