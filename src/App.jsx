@@ -292,7 +292,9 @@ export default function App({ order, onBack }) {
       const words = search.toLowerCase().split(/\s+/);
       h = h.filter(i => {
         const haystack = (i.sku + ' ' + i.catLabel + ' ' + i.line + ' ' + (i.width ? i.width + 'cm' : '')).toLowerCase();
-        return words.every(w => haystack.includes(w));
+        // Also create a normalized haystack without spaces in SKU prefix (e.g. "WS 16" → "WS16")
+        const haystackNoSpace = haystack.replace(/^([a-z]+)\s+(\d)/, '$1$2');
+        return words.every(w => haystack.includes(w) || haystackNoSpace.includes(w));
       });
     }
     return h.slice(0, 200);
