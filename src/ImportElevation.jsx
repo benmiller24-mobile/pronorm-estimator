@@ -64,14 +64,15 @@ function buildXLineReference(catalog) {
 
 export default function ImportElevation({ onBack, onOrderCreated }) {
   const { user } = useAuth();
-  const elevInputRef = useRef(null);
+  const elevInputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
   const floorInputRef = useRef(null);
 
   // States
   const BUILT_IN_KEY = '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';
   const [apiKey] = useState(BUILT_IN_KEY);
-  const [elevFile, setElevFile] = useState(null);
-  const [elevPreview, setElevPreview] = useState(null);
+  // Support up to 4 elevation images
+  const [elevFiles, setElevFiles] = useState([null, null, null, null]);
+  const [elevPreviews, setElevPreviews] = useState([null, null, null, null]);
   const [floorFile, setFloorFile] = useState(null);
   const [floorPreview, setFloorPreview] = useState(null);
   const [projectName, setProjectName] = useState('');
@@ -104,10 +105,20 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
     reader.readAsDataURL(file);
   };
 
-  // Build uploadedImages array from the two slots (used by analyze)
+  // Helper to set a specific elevation slot
+  const setElevSlot = (idx, file, preview) => {
+    setElevFiles(prev => { const n = [...prev]; n[idx] = file; return n; });
+    setElevPreviews(prev => { const n = [...prev]; n[idx] = preview; return n; });
+  };
+
+  // Build uploadedImages array from all slots (used by analyze)
   const getUploadedImages = () => {
     const imgs = [];
-    if (elevFile && elevPreview) imgs.push({ file: elevFile, preview: elevPreview, label: 'Elevation' });
+    elevFiles.forEach((file, idx) => {
+      if (file && elevPreviews[idx]) {
+        imgs.push({ file, preview: elevPreviews[idx], label: `Elevation ${idx + 1}` });
+      }
+    });
     if (floorFile && floorPreview) imgs.push({ file: floorFile, preview: floorPreview, label: 'Floorplan' });
     return imgs;
   };
@@ -295,9 +306,11 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
       const prompt = `You are a Pronorm kitchen cabinet expert. You are analyzing ${imageDescription} of a kitchen design.
 
 ${hasMultiple ? `IMPORTANT: You have MULTIPLE views of the same kitchen. Cross-reference all images:
-- Elevation views show door styles, handle positions, and vertical dimensions
+- Elevation views show door styles, handle positions, and vertical dimensions — each elevation may show a DIFFERENT WALL of the kitchen
 - Floorplan views show cabinet depths, spatial layout, and how cabinets relate to each other
-- Use ALL views together to accurately identify each cabinet` : ''}
+- Use ALL views together to accurately identify each cabinet
+- Each elevation wall should be analyzed separately, then combine all detected cabinets into one unified list
+- Do NOT double-count cabinets that appear in multiple views — use the floorplan to resolve overlaps` : ''}
 
 ## STEP-BY-STEP METHODOLOGY — FOLLOW THIS EXACTLY
 
@@ -602,7 +615,8 @@ Return ONLY the JSON array, no other text.`;
     }
   };
 
-  const hasImages = !!(elevFile || floorFile);
+  const hasImages = !!(elevFiles.some(f => f) || floorFile);
+  const imageCount = elevFiles.filter(f => f).length + (floorFile ? 1 : 0);
 
   return (
     <div style={s.container}>
@@ -617,7 +631,7 @@ Return ONLY the JSON array, no other text.`;
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 8 }}>Import Kitchen Elevation</h1>
           <p style={{ fontSize: 14, color: C.textSec }}>
-            Upload an elevation and/or floorplan image. Providing both gives the most accurate detection — the elevation shows cabinet fronts and heights while the floorplan reveals spatial layout and depth.
+            Upload up to 4 elevation images (one per wall) and an optional floorplan. Multiple elevations allow detection across all kitchen walls. The floorplan helps resolve spatial layout and depth.
           </p>
         </div>
 
@@ -627,47 +641,70 @@ Return ONLY the JSON array, no other text.`;
           </div>
         )}
 
-        {/* Two separate image upload zones */}
-        <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-          {/* Elevation zone */}
-          <div style={{ ...s.section, flex: '1 1 300px', marginBottom: 0 }}>
-            <label style={s.label}>Elevation Image (front view)</label>
-            <input
-              ref={elevInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                if (e.target.files?.[0]) pickFile(e.target.files[0], setElevFile, setElevPreview);
-                e.target.value = '';
-              }}
-            />
-            {!elevPreview ? (
-              <div
-                style={s.dropZone}
-                onClick={() => elevInputRef.current?.click()}
-                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files?.[0]) pickFile(e.dataTransfer.files[0], setElevFile, setElevPreview); }}
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              >
-                <div style={{ fontSize: 14, fontWeight: 500 }}>Click to upload elevation</div>
-                <div style={{ fontSize: 12, color: C.textSec, marginTop: 4 }}>Front view showing cabinets & heights</div>
+        {/* Elevation upload zones (up to 4) */}
+        <div style={s.section}>
+          <label style={s.label}>Elevation Images (front views) — up to 4</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+            {[0, 1, 2, 3].map((idx) => (
+              <div key={idx}>
+                <input
+                  ref={elevInputRefs[idx]}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      const file = e.target.files[0];
+                      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                        setError('Please upload a PNG, JPG, or WEBP image');
+                        return;
+                      }
+                      setError(null);
+                      const reader = new FileReader();
+                      reader.onload = (evt) => setElevSlot(idx, file, evt.target.result);
+                      reader.readAsDataURL(file);
+                    }
+                    e.target.value = '';
+                  }}
+                />
+                {!elevPreviews[idx] ? (
+                  <div
+                    style={{ ...s.dropZone, padding: 20, minHeight: 80 }}
+                    onClick={() => elevInputRefs[idx].current?.click()}
+                    onDrop={(e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                        const reader = new FileReader();
+                        reader.onload = (evt) => setElevSlot(idx, file, evt.target.result);
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>Elevation {idx + 1}</div>
+                    <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>Click to upload</div>
+                  </div>
+                ) : (
+                  <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 8 }}>
+                    <img src={elevPreviews[idx]} style={{ ...s.preview, maxWidth: '100%', maxHeight: 120 }} alt={`Elevation ${idx + 1}`} />
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: C.textSec, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{elevFiles[idx]?.name}</span>
+                      <button
+                        style={{ ...s.button, padding: '2px 8px', fontSize: 10, color: C.danger }}
+                        onClick={() => setElevSlot(idx, null, null)}
+                      >✕</button>
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div>
-                <img src={elevPreview} style={s.preview} alt="Elevation" />
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <span style={{ fontSize: 12, color: C.textSec, flex: 1 }}>{elevFile?.name}</span>
-                  <button
-                    style={{ ...s.button, padding: '2px 10px', fontSize: 11, color: C.danger }}
-                    onClick={() => { setElevFile(null); setElevPreview(null); }}
-                  >Remove</button>
-                </div>
-              </div>
-            )}
+            ))}
           </div>
+        </div>
 
-          {/* Floorplan zone */}
-          <div style={{ ...s.section, flex: '1 1 300px', marginBottom: 0 }}>
+        {/* Floorplan upload zone */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={s.section}>
             <label style={s.label}>Floorplan Image (top-down view) — optional</label>
             <input
               ref={floorInputRef}
@@ -681,7 +718,7 @@ Return ONLY the JSON array, no other text.`;
             />
             {!floorPreview ? (
               <div
-                style={s.dropZone}
+                style={{ ...s.dropZone, padding: 20 }}
                 onClick={() => floorInputRef.current?.click()}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files?.[0]) pickFile(e.dataTransfer.files[0], setFloorFile, setFloorPreview); }}
                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -729,7 +766,7 @@ Return ONLY the JSON array, no other text.`;
             onClick={handleAnalyze}
             disabled={loading || !hasImages || !projectName}
           >
-            {loading ? <span style={s.spinner} /> : `Analyze ${elevFile && floorFile ? '2 Images' : 'Image'}`}
+            {loading ? <span style={s.spinner} /> : `Analyze ${imageCount > 1 ? `${imageCount} Images` : 'Image'}`}
           </button>
           {analysisLog && (
             <span style={{ fontSize: 12, color: C.textSec }}>{analysisLog}</span>
