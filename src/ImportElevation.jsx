@@ -316,14 +316,14 @@ Look at the BOTTOM of the elevation drawing. There will be dimension lines with 
 The drawing will have numbered circles/labels (1, 2, 3...) on the cabinets. Map each number to its width from the dimension line.
 
 ### Step 4: Identify what each cabinet IS
-⚠️ APPLIANCE CHECK (DO THIS FIRST FOR EVERY POSITION):
-Look at what is INSIDE the cabinet at each position. If you see ANY of these, it is an APPLIANCE — SKIP IT COMPLETELY, do NOT output it:
-- Wine cooler / wine fridge (look for bottles on shelves, dark glass door, cooling unit)
-- Built-in oven or microwave
-- Dishwasher
-- Fridge or freezer
-- Any position that shows an appliance graphic/rendering rather than cabinet doors
-Appliances are NOT Pronorm furniture items. They are bought separately. DO NOT include them.
+⚠️ APPLIANCE CHECK — DO THIS FIRST FOR EVERY POSITION (THIS IS CRITICAL):
+For EACH numbered position, look at the VISUAL CONTENT inside:
+- Does it show wine bottles on shelves, dark/glass door, or a cooling unit? → WINE COOLER → SKIP
+- Does it show an oven cavity, control knobs, or heating elements? → OVEN → SKIP
+- Does it show a fridge/freezer interior? → FRIDGE → SKIP
+- Does it look visually different from the other cabinets (different color, different material, appliance graphic)? → APPLIANCE → SKIP
+If the first position (leftmost unit) looks like a wine cooler or any appliance — DO NOT include it.
+Appliances are NOT Pronorm furniture. They are bought separately. NEVER include them in the output.
 
 For actual CABINETS:
 - If it's a wide unit (90cm) with horizontal bars/grooves → pull-out unit, use variant -38
@@ -453,8 +453,62 @@ Return ONLY the JSON array, no other text.`;
         };
       });
 
-      setDetectedItems(enrichedItems);
-      setAnalysisLog(`Analysis complete. ${enrichedItems.length} items detected and matched.`);
+      // ── Post-processing: fix known detection gaps ──
+      const postProcessed = [...enrichedItems];
+
+      // Helper to check if a SKU pattern exists in the list
+      const hasSku = (pattern) => postProcessed.some(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern));
+      const countSku = (pattern) => postProcessed.filter(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern)).length;
+
+      // 1. Ensure UVX 30-76-41 (larder) exists: if we have 3+ items with UX 30-76-41 but no UVX, convert the last one
+      if (!hasSku('UVX') && countSku('UX30-76-41') >= 3) {
+        // Find the last UX 30-76-41 and convert it to UVX
+        for (let i = postProcessed.length - 1; i >= 0; i--) {
+          if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
+            const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
+            if (uvxMatch) {
+              postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
+            }
+            break;
+          }
+        }
+      }
+
+      // 2. Ensure PUX 20-76 (filler) exists: if missing, add it before plinth
+      if (!hasSku('PUX20-76')) {
+        const puxMatch = parsedCatalog.find(c => c.sku === 'PUX 20-76');
+        if (puxMatch) {
+          const plinthIdx = postProcessed.findIndex(i => i.type === 'plinth');
+          const insertIdx = plinthIdx >= 0 ? plinthIdx : postProcessed.length;
+          const puxItem = {
+            position: null, description: 'Filler panel 20cm (auto-added)', width_mm: 200, width_cm: 20,
+            type: 'filler', suggested_sku: 'PUX 20-76', suggestedSku: puxMatch.sku,
+            suggestedCat: puxMatch.cat, matchedCatLabel: puxMatch.catLabel,
+            confidence: 'medium', notes: 'Auto-added: filler panels are standard at end of cabinet runs',
+            alternatives: parsedCatalog.filter(c => c.cat === 'Filler' || (c.cat === 'Base-Std' && /^PUX/.test(c.sku))).slice(0, 20)
+          };
+          postProcessed.splice(insertIdx, 0, puxItem);
+        }
+      }
+
+      // 3. Ensure UVX 30-76-41 exists even if only 2 UX 30-76-41s: if there are 2+ UX 30-76-41 and no UVX, convert last one
+      if (!hasSku('UVX')) {
+        const ux30Count = countSku('UX30-76-41');
+        if (ux30Count >= 2) {
+          for (let i = postProcessed.length - 1; i >= 0; i--) {
+            if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
+              const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
+              if (uvxMatch) {
+                postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      setDetectedItems(postProcessed);
+      setAnalysisLog(`Analysis complete. ${postProcessed.length} items detected and matched.`);
 
       // Initialize selections with suggested SKUs
       const selections = {};
