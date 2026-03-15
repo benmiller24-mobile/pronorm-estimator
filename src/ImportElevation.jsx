@@ -81,37 +81,68 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
   const matchSKU = (detectedItem) => {
     if (!parsedCatalog || !parsedCatalog.length) return null;
 
-    const { type, width_cm } = detectedItem;
+    const { type, width_cm, description, notes } = detectedItem;
+    const desc = ((description || '') + ' ' + (notes || '')).toLowerCase();
 
     // Category mapping: type → category filter
     const categoryPatterns = {
-      'base': (cat) => cat.startsWith('Base-'),
+      'base': (cat) => cat.startsWith('Base-') && cat !== 'Base-Sink' && cat !== 'Base-Hob',
       'sink': (cat) => cat === 'Base-Sink',
       'hob': (cat) => cat === 'Base-Hob' || cat === 'Base-Hob-Ext',
       'corner': (cat) => cat.includes('Corner'),
-      'wall': (cat) => cat.startsWith('Wall'),
+      'wall': (cat) => cat.startsWith('Wall') && !cat.includes('Corner'),
       'tall': (cat) => cat.startsWith('Tall'),
-      'housing': (cat) => cat === 'Tall-Housing',
+      'housing': (cat) => cat === 'Tall-Housing' || cat.startsWith('Tall'),
       'panel': (cat) => cat === 'Panel',
       'filler': (cat) => cat === 'Filler',
       'plinth': (cat) => cat === 'Plinth',
-      'drawer': (cat) => cat === 'Front-Drawer',
+      'drawer': (cat) => cat.startsWith('Base-'),
     };
 
-    const matcher = categoryPatterns[type] || ((cat) => true);
+    const matcher = categoryPatterns[type] || (() => true);
     const candidates = parsedCatalog.filter((item) => {
       if (!matcher(item.cat)) return false;
-      if (!width_cm && item.width) return false; // Only exact width matches if detected width is known
       return true;
     });
 
-    // Sort by closest width match
-    const sorted = candidates.sort((a, b) => {
-      if (!width_cm) return 0;
-      return Math.abs(a.width - width_cm) - Math.abs(b.width - width_cm);
+    // Score each candidate: closer width = better, X-line SKUs preferred
+    const scored = candidates.map(item => {
+      let score = 0;
+      // Width match (lower distance = better)
+      if (width_cm && item.width) {
+        const widthDiff = Math.abs(item.width - width_cm);
+        score -= widthDiff * 10; // Penalize width mismatch
+        if (widthDiff === 0) score += 100; // Bonus for exact width
+      }
+      // Prefer X-line SKUs (UX, OX, etc.) as they're the most common range
+      if (/^[A-Z]+X\s?\d/.test(item.sku) || item.sku.startsWith('UX') || item.sku.startsWith('OX') || item.sku.startsWith('UVX') || item.sku.startsWith('USX') || item.sku.startsWith('PUX') || item.sku.startsWith('PHX')) {
+        score += 50;
+      }
+      // Prefer standard variants (-01, -38, -41) for base units
+      if (type === 'base') {
+        if (desc.includes('pull-out') || desc.includes('drawer')) {
+          if (item.sku.includes('-38') || item.sku.includes('-37')) score += 30;
+        } else if (desc.includes('bottle')) {
+          if (item.sku.includes('-41')) score += 30;
+        } else {
+          if (item.sku.includes('-01')) score += 20;
+        }
+      }
+      // Larder/bottle unit matching
+      if (desc.includes('larder') && item.cat === 'Base-Larder') score += 40;
+      if (desc.includes('bottle') && item.sku.includes('V')) score += 30;
+      // Filler panel
+      if (type === 'filler' && item.sku.startsWith('PU')) score += 30;
+      // Panel matching
+      if (type === 'panel' && (item.sku.startsWith('WS') || item.sku.startsWith('ST'))) score += 30;
+      // Plinth
+      if (type === 'plinth' && item.sku.startsWith('SB')) score += 30;
+
+      return { item, score };
     });
 
-    return sorted[0] || null;
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0]?.item || null;
   };
 
   // Analyze image with Claude Vision API
@@ -136,20 +167,34 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
         const base64Data = e.target.result.split(',')[1];
         const imageType = imageFile.type;
 
-        const prompt = `You are a kitchen cabinet expert analyzing kitchen elevation drawings or floor plans.
+        const prompt = `You are a Pronorm kitchen cabinet expert analyzing kitchen elevation drawings and floor plans.
 
-Analyze this image and identify all kitchen cabinets, units, and components. For each item detected, return a JSON array with these exact fields:
-- position: number/label if visible in drawing (e.g., "1", "2", or null)
-- description: type of unit (e.g., "Base unit 60cm", "Wall unit 40cm", "Tall larder unit", "Corner base")
-- width_mm: estimated width in millimeters (if not visible, estimate based on standard sizes: 30, 40, 45, 50, 60, 80, 90, 100, 110, 120 cm)
+Analyze this image carefully. Identify EVERY cabinet, unit, panel, filler, and component visible. Pay close attention to:
+- Numbered positions (1, 2, 3, etc.) in the drawing
+- Dimension lines and measurements (may be in inches — convert to cm by multiplying by 2.54)
+- Different cabinet types visible: base units (below countertop), wall units (above countertop), tall/larder units (floor to ceiling), appliance housings (wine cooler, oven, fridge), corner units, drawer units, pull-out units, bottle units
+- Side panels (tall narrow panels on sides of runs), filler panels (narrow gap fillers), plinths (kick boards at bottom)
+
+For EACH item, return a JSON object with these fields:
+- position: the number label visible in the drawing (e.g., "1", "2"), or null if no number
+- description: detailed type description (e.g., "Pull-out base unit 90cm", "Bottle unit 30cm", "Side panel", "Appliance housing for wine cooler", "Filler panel 20cm")
+- width_mm: width in millimeters. If dimensions are in inches, multiply by 25.4 to get mm. Round to nearest standard Pronorm width: 200, 300, 400, 450, 500, 600, 800, 900, 1000, 1100, 1200 mm
 - width_cm: width in centimeters (width_mm / 10)
-- height_description: height category ("standard base" ~87cm, "wall" ~70cm, "tall" ~200cm, etc.)
-- type: one of these exactly: "base", "sink", "hob", "corner", "wall", "tall", "housing", "panel", "filler", "plinth", "drawer"
-- confidence: "high", "medium", or "low"
+- height_description: "standard base" (~76cm carcase), "wall" (~51-89cm), "tall" (~200-227cm), "mid-height" (~144cm), or "panel"
+- type: one of exactly: "base", "sink", "hob", "corner", "wall", "tall", "housing", "panel", "filler", "plinth", "drawer"
+  - Use "housing" for appliance housings (wine cooler, oven, dishwasher)
+  - Use "panel" for side panels/stiles
+  - Use "filler" for narrow filler panels
+  - Use "base" for standard base units, pull-out units, bottle units
+  - Use "drawer" for drawer-only units
+- confidence: "high" if position number and dimensions are clearly visible, "medium" if estimated, "low" if guessing
+- notes: any additional detail (e.g., "has internal drawers", "wine cooler housing", "with bottle holder")
 
-Pronorm uses metric measurements. Standard base units are 87cm high, wall units are 70cm, tall units are 200cm.
-Return ONLY valid JSON array, no other text. Example format:
-[{"position":"1","description":"Base unit 60cm","width_mm":600,"width_cm":60,"height_description":"standard base","type":"base","confidence":"high"}]`;
+IMPORTANT: Also identify any panels (side panels at ends of runs), plinth boards, and filler pieces — these are often overlooked but are critical parts of a kitchen order.
+
+If dimensions are shown in inches (with " symbol or fractions like 35 7/16"), convert to metric.
+
+Return ONLY a valid JSON array, no other text.`;
 
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -197,18 +242,25 @@ Return ONLY valid JSON array, no other text. Example format:
             alternatives: parsedCatalog
               .filter((cat) => {
                 const t = item.type;
-                if (t === 'base' || t === 'sink' || t === 'hob') return cat.cat.startsWith('Base-');
+                if (t === 'base' || t === 'sink' || t === 'hob' || t === 'drawer') return cat.cat.startsWith('Base-');
                 if (t === 'wall') return cat.cat.startsWith('Wall');
                 if (t === 'tall' || t === 'housing') return cat.cat.startsWith('Tall');
                 if (t === 'corner') return cat.cat.includes('Corner');
                 if (t === 'panel') return cat.cat === 'Panel';
                 if (t === 'filler') return cat.cat === 'Filler';
                 if (t === 'plinth') return cat.cat === 'Plinth';
-                if (t === 'drawer') return cat.cat === 'Front-Drawer';
                 return true;
               })
-              .sort((a, b) => Math.abs((a.width || 0) - (item.width_cm || 0)) - Math.abs((b.width || 0) - (item.width_cm || 0)))
-              .slice(0, 20)
+              .sort((a, b) => {
+                // Prefer exact width matches, then X-line SKUs
+                const aDiff = Math.abs((a.width || 0) - (item.width_cm || 0));
+                const bDiff = Math.abs((b.width || 0) - (item.width_cm || 0));
+                if (aDiff !== bDiff) return aDiff - bDiff;
+                const aX = /^[A-Z]*X[\s]?\d/.test(a.sku) ? 0 : 1;
+                const bX = /^[A-Z]*X[\s]?\d/.test(b.sku) ? 0 : 1;
+                return aX - bX;
+              })
+              .slice(0, 30)
           };
         });
 
