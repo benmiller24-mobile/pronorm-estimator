@@ -9,7 +9,7 @@ import ImportElevation from './ImportElevation.jsx';
 const FONT = "'DM Sans',system-ui,sans-serif";
 
 export default function AppShell() {
-  const { user, profile, loading, isEmbed } = useAuth();
+  const { user, profile, loading } = useAuth();
   const [currentOrder, setCurrentOrder] = useState(null); // null = order list, '__admin__' = admin, {order} = estimator
   const [view, setView] = useState('list'); // list | estimator | admin | import
 
@@ -30,25 +30,6 @@ export default function AppShell() {
   // Not logged in
   if (!user || !profile) {
     return <LoginPage />;
-  }
-
-  // Portal embed mode — go straight to a blank estimator (no order list, no save)
-  if (isEmbed) {
-    return (
-      <App
-        order={{
-          id: 'embed-session',
-          project_name: 'Quick Estimate',
-          rooms: [],
-          pg: 0,
-          cf: 1,
-          show_cost: false,
-          notes: '',
-        }}
-        onBack={() => {}}
-        embedMode
-      />
-    );
   }
 
   // Admin panel
