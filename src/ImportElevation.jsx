@@ -40,7 +40,8 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
   const fileInputRef = useRef(null);
 
   // States
-  const [apiKey, setApiKey] = useState(localStorage.getItem('pronorm_api_key') || '');
+  const BUILT_IN_KEY = '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';
+  const [apiKey] = useState(BUILT_IN_KEY);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [projectName, setProjectName] = useState('');
@@ -57,12 +58,6 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
       setParsedCatalog(parseData(RAW_DATA));
     }
   }, [parsedCatalog]);
-
-  // Save API key to localStorage
-  const handleApiKeyChange = (value) => {
-    setApiKey(value);
-    localStorage.setItem('pronorm_api_key', value);
-  };
 
   // Handle image upload
   const handleImageDrop = (e) => {
@@ -121,10 +116,6 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
 
   // Analyze image with Claude Vision API
   const handleAnalyze = async () => {
-    if (!apiKey.trim()) {
-      setError('Please enter your Anthropic API key');
-      return;
-    }
     if (!imageFile) {
       setError('Please upload an image first');
       return;
@@ -313,21 +304,6 @@ Return ONLY valid JSON array, no other text. Example format:
           </div>
         )}
 
-        {/* API Key Input */}
-        <div style={s.section}>
-          <label style={s.label}>Anthropic API Key</label>
-          <input
-            style={s.input}
-            type="password"
-            placeholder="sk-ant-..."
-            value={apiKey}
-            onChange={(e) => handleApiKeyChange(e.target.value)}
-          />
-          <div style={s.note}>
-            Your API key is stored in your browser's local storage and never sent to our servers. Get your key from console.anthropic.com.
-          </div>
-        </div>
-
         {/* Image Upload */}
         <div style={s.section}>
           <label style={s.label}>Kitchen Image</label>
@@ -378,9 +354,9 @@ Return ONLY valid JSON array, no other text. Example format:
         {/* Analyze Button */}
         <div style={{ marginBottom: 24, display: 'flex', gap: 12 }}>
           <button
-            style={apiKey && imageFile && projectName ? s.buttonPrimary : s.buttonDisabled}
+            style={imageFile && projectName ? s.buttonPrimary : s.buttonDisabled}
             onClick={handleAnalyze}
-            disabled={loading || !apiKey || !imageFile || !projectName}
+            disabled={loading || !imageFile || !projectName}
           >
             {loading ? <span style={s.spinner} /> : 'Analyze Image'}
           </button>
