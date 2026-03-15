@@ -285,9 +285,6 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
         });
       }
 
-      // Build X-line reference for the prompt
-      const xLineRef = parsedCatalog ? buildXLineReference(parsedCatalog) : '';
-
       setAnalysisLog('Sending to Claude Vision API...');
 
       const hasMultiple = uploadedImages.length > 1;
@@ -302,80 +299,77 @@ ${hasMultiple ? `IMPORTANT: You have MULTIPLE views of the same kitchen. Cross-r
 - Floorplan views show cabinet depths, spatial layout, and how cabinets relate to each other
 - Use ALL views together to accurately identify each cabinet` : ''}
 
-## YOUR TASK
-Identify every cabinet, unit, panel, filler, and component. For each one, suggest the most likely PRONORM SKU code.
+## STEP-BY-STEP METHODOLOGY — FOLLOW THIS EXACTLY
 
-## PRONORM SKU NAMING CONVENTION
-Pronorm X-line base units follow this pattern: UX [width]-[height]-[variant]
-- UX = standard base unit (X-line)
-- UVX = base larder/bottle pull-out unit (X-line) - tall narrow pull-out storage
-- PUX = filler panel (X-line)
-- WS 16 = worktop panel / side panel
-- SB 11 = plinth (kick board)
+### Step 1: Read ALL dimension lines
+Look at the BOTTOM of the elevation drawing. There will be dimension lines with measurements (usually in inches with fractions like 35 7/16"). Read EVERY dimension from left to right. These dimensions tell you the WIDTH of each cabinet.
 
-### Width codes (first number after prefix):
-Width in cm directly encoded: 30, 40, 45, 50, 60, 80, 90, 100, 120
+### Step 2: Convert inches to cm and round to standard Pronorm widths
+- 11 13/16" = 30cm → standard Pronorm 30cm width
+- 23 5/8" = 60cm → standard Pronorm 60cm width
+- 24" = 61cm → standard Pronorm 60cm width
+- 35 7/16" = 90cm → standard Pronorm 90cm width
+- 7 7/8" or ~8" = 20cm → standard Pronorm 20cm width (filler panel)
+- Small gaps like 5/8", 1 9/16", 1 5/16" are NOT cabinets — they are gaps/margins, SKIP them
 
-### Height codes (second number):
-- 38 = low (drawer height ~38cm)
-- 76 = standard base height (~76cm carcase)
-- 83 = extended height (~83cm)
+### Step 3: Match numbered positions to their widths
+The drawing will have numbered circles/labels (1, 2, 3...) on the cabinets. Map each number to its width from the dimension line.
 
-### Common variant suffixes (third number):
-- 01 = standard with shelves (hinged door)
-- 10 = standard with glass door
-- 20 = open unit (no door)
-- 30 = with 1 inner drawer
-- 32 = with 2 inner drawers
-- 37 = with 1 pull-out + 1 inner drawer (popular for 60cm wide)
-- 38 = full internal pull-out drawers (most popular for 90cm wide)
-- 41 = bottle pull-out / narrow pull-out storage
-- 44 = with top drawer and door below
-- 45 = with waste bin pull-out
-- 74 = similar to 37 variant
+### Step 4: Identify what each cabinet IS
+- If it shows a wine cooler, fridge, oven, or dishwasher → it's an APPLIANCE, NOT a Pronorm cabinet. SKIP IT. Do not include appliances in the output.
+- If it's a wide unit (90cm) with horizontal bars/grooves → pull-out unit, use variant -38
+- If it's a 60cm unit with horizontal bars/grooves → pull-out unit, use variant -37 (this is the standard 60cm pull-out)
+- If it's a narrow unit (30cm) → most likely a bottle unit (-41) or larder pull-out (UVX prefix with -41)
+- If it's very narrow (≤20cm) at the end of a run → filler panel (PUX)
+- The LAST narrow unit (closest to the end of the run) is often a UVX larder, not a standard UX
 
-### ACTUAL AVAILABLE X-LINE BASE SKUs in our catalog:
-${xLineRef}
+### Step 5: Don't forget non-numbered items
+- Side panel: WS 16-00-02 (always include ONE — it's the panel on the side of the end cabinet)
+- Plinth: SB 11 (the kick board running along the bottom — always include ONE)
+- Filler panel: PUX 20-76 (narrow piece at the end of a run, ~20cm, to fill the gap to the wall)
 
-## CONVERSION: Inches to Metric
-If dimensions are in inches (marked with " or shown as fractions like 35 7/16"):
-- Multiply inches by 25.4 to get mm, then divide by 10 for cm
-- Round to nearest standard Pronorm width: 20, 30, 40, 45, 50, 60, 80, 90, 100, 120 cm
-- Common conversions: 24" ≈ 60cm, 35 7/16" ≈ 90cm, 23 5/8" ≈ 60cm, 11 13/16" ≈ 30cm, 7 7/8" ≈ 20cm
+## PRONORM SKU FORMAT: PREFIX WIDTH-HEIGHT-VARIANT
+- UX = standard base unit (X-line). Example: UX 90-76-38
+- UVX = larder/tall pull-out unit. Example: UVX 30-76-41
+- PUX = filler panel. Example: PUX 20-76
+- WS 16-00-02 = side panel (both sides coated)
+- SB 11 = plinth
 
-## IMPORTANT IDENTIFICATION TIPS
-1. A wine cooler, fridge, or oven housing is typically 60cm wide - look for the appliance outline
-2. Adjacent 90cm units with horizontal handle bars are typically pull-out units (variant -38)
-3. Narrow 30cm units next to wider ones are often bottle pull-outs (UX 30-76-41) or larder pull-outs (UVX 30-76-41)
-4. Very narrow pieces (≤20cm) at the end of a run are filler panels (PUX 20-76)
-5. Don't forget: side panels (WS 16-00-02), plinths (SB 11), and filler panels are critical order items
-6. If a position shows a tall narrow unit with internal pull-out mechanism, it's likely UVX (larder variant)
-7. Base units at standard height are -76- (76cm carcase height)
+### Width = first number: 20, 30, 40, 45, 50, 60, 80, 90, 100, 120 (cm)
+### Height = second number: 76 (ALWAYS use 76 for standard base units under a countertop)
+### Variant = third number:
+- 01 = standard with shelves (hinged door) — ONLY use if you see a simple door with no pull-out handles
+- 37 = pull-out with inner drawer — USE FOR 60cm WIDE pull-out units
+- 38 = full internal pull-out drawers — USE FOR 90cm WIDE pull-out units
+- 41 = bottle pull-out / narrow pull-out — USE FOR 30cm WIDE units
+- DO NOT default to -01. Most modern kitchens use pull-out variants (-37, -38, -41).
+
+## CRITICAL RULES
+1. Read the dimension lines CAREFULLY. Each dimension corresponds to one cabinet width.
+2. Do NOT include appliances (wine cooler, fridge, oven, dishwasher) as Pronorm items.
+3. ALWAYS use height code 76 for base units.
+4. For 90cm base → variant -38. For 60cm base → variant -37. For 30cm base → variant -41.
+5. The last 30cm unit before the filler is typically UVX 30-76-41 (larder), not UX.
+6. Include exactly ONE WS 16-00-02 (side panel) and ONE SB 11 (plinth).
+7. Include PUX 20-76 if there's a narrow piece (≤20cm) at the end of the run.
 
 ## OUTPUT FORMAT
-Return a JSON array. For EACH item detected:
+Return ONLY a valid JSON array. For each item:
 {
-  "position": "1",
+  "position": "2",
   "description": "Pull-out base unit 90cm with internal drawers",
   "width_mm": 900,
   "width_cm": 90,
   "height_description": "standard base (76cm)",
   "type": "base",
   "suggested_sku": "UX 90-76-38",
-  "variant_hint": "pull-out drawers visible, horizontal handle bar",
+  "variant_hint": "pull-out, 90cm wide, horizontal handle bars",
   "confidence": "high",
-  "notes": "Two horizontal handle bars visible indicating full pull-out internal system"
+  "notes": "35 7/16 inch = 90cm, pull-out handles visible"
 }
 
-Type must be one of: "base", "sink", "hob", "corner", "wall", "tall", "housing", "larder", "panel", "filler", "plinth", "drawer", "worktop_panel"
-
-CRITICAL RULES:
-- Include ALL items: panels, plinths, fillers — these are easy to miss but essential
-- Use the ACTUAL SKU codes from the catalog reference above
-- Every base unit at standard counter height should use -76- height code
-- If you see pull-out handles/bars, use -38 or -37 variants
-- Suggest quantity if you see the same unit repeated
-- Return ONLY the JSON array, no other text`;
+Type must be one of: "base", "larder", "panel", "filler", "plinth"
+Return ONLY the JSON array, no other text.`;
 
       imageContents.push({ type: 'text', text: prompt });
 
