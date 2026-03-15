@@ -472,16 +472,34 @@ Return ONLY the JSON array, no other text.`;
       const hasSku = (pattern) => postProcessed.some(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern));
       const countSku = (pattern) => postProcessed.filter(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern)).length;
 
-      // 1. Ensure UVX 30-76-41 (larder) exists: if we have 2+ items with UX 30-76-41 but no UVX, convert the last one
-      if (!hasSku('UVX') && countSku('UX30-76-41') >= 2) {
-        // Find the last UX 30-76-41 and convert it to UVX
-        for (let i = postProcessed.length - 1; i >= 0; i--) {
-          if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
-            const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
-            if (uvxMatch) {
-              postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
+      // 1. Ensure UVX 30-76-41 (larder) exists
+      if (!hasSku('UVX')) {
+        const ux30Count = countSku('UX30-76-41');
+        if (ux30Count >= 3) {
+          // 3+ UX 30s detected: convert the last one to UVX (keeps 2× UX + 1× UVX)
+          for (let i = postProcessed.length - 1; i >= 0; i--) {
+            if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
+              const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
+              if (uvxMatch) {
+                postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
+              }
+              break;
             }
-            break;
+          }
+        } else if (ux30Count >= 1) {
+          // Only 1-2 UX 30s detected: add a UVX rather than converting (preserves existing UX 30s)
+          const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
+          if (uvxMatch) {
+            // Insert before plinth/filler
+            const plinthIdx = postProcessed.findIndex(i => i.type === 'plinth' || i.type === 'filler');
+            const insertIdx = plinthIdx >= 0 ? plinthIdx : postProcessed.length;
+            postProcessed.splice(insertIdx, 0, {
+              position: null, description: 'Larder unit 30cm (auto-added)', width_mm: 300, width_cm: 30,
+              type: 'larder', suggested_sku: 'UVX 30-76-41', suggestedSku: uvxMatch.sku,
+              suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel,
+              confidence: 'medium', notes: 'Auto-added: larder pull-out is standard in modern kitchens',
+              alternatives: parsedCatalog.filter(c => c.cat === 'Base-Larder' || (c.cat === 'Base-Std' && /^UVX/.test(c.sku))).slice(0, 20)
+            });
           }
         }
       }
