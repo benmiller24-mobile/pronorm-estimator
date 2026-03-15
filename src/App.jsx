@@ -241,12 +241,22 @@ export default function App({ order, onBack }) {
   const [rooms, setRooms] = useState(initRooms);
   const [activeRoom, setActiveRoom] = useState(initRooms[0]?.id || 1);
   const [showCost, setShowCost] = useState(order?.show_cost ?? false);
-  const [orderNotes, setOrderNotes] = useState(order?.notes || '');
-  const [clientName, setClientName] = useState(order?.client_name || '');
-  const [clientEmail, setClientEmail] = useState(order?.client_email || '');
-  const [clientPhone, setClientPhone] = useState(order?.client_phone || '');
-  const [clientAddress, setClientAddress] = useState(order?.client_address || '');
-  const [orderRef, setOrderRef] = useState(order?.order_ref || '');
+  // Parse notes field: may be JSON (new format with client info) or plain text (legacy)
+  const parsedNotes = (() => {
+    try {
+      const n = order?.notes;
+      if (!n) return {};
+      const parsed = JSON.parse(n);
+      if (typeof parsed === 'object' && parsed !== null) return parsed;
+      return { text: n };
+    } catch { return { text: order?.notes || '' }; }
+  })();
+  const [orderNotes, setOrderNotes] = useState(parsedNotes.text || '');
+  const [clientName, setClientName] = useState(parsedNotes.clientName || '');
+  const [clientEmail, setClientEmail] = useState(parsedNotes.clientEmail || '');
+  const [clientPhone, setClientPhone] = useState(parsedNotes.clientPhone || '');
+  const [clientAddress, setClientAddress] = useState(parsedNotes.clientAddress || '');
+  const [orderRef, setOrderRef] = useState(parsedNotes.orderRef || '');
   const [projectDetailsOpen, setProjectDetailsOpen] = useState(false);
   const [showSpecial, setShowSpecial] = useState(false);
   const [scSearch, setScSearch] = useState('');
