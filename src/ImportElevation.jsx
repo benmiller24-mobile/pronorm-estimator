@@ -306,91 +306,94 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
       const prompt = `You are a Pronorm kitchen cabinet expert. You are analyzing ${imageDescription} of a kitchen design.
 
 ${hasMultiple ? `IMPORTANT: You have MULTIPLE views of the same kitchen. Cross-reference all images:
-- Elevation views show door styles, handle positions, and vertical dimensions — each elevation may show a DIFFERENT WALL of the kitchen
-- Floorplan views show cabinet depths, spatial layout, and how cabinets relate to each other
-- Use ALL views together to accurately identify each cabinet
-- Each elevation wall should be analyzed separately, then combine all detected cabinets into one unified list
-- Do NOT double-count cabinets that appear in multiple views — use the floorplan to resolve overlaps` : ''}
+- Each elevation typically shows a DIFFERENT WALL — analyze each wall separately
+- The floorplan shows the overall layout: use it to identify which cabinets are on which wall, where the island is, etc.
+- Combine all cabinets from ALL walls into one unified list
+- Do NOT double-count cabinets that appear in multiple views — use the floorplan to resolve overlaps
+- Numbered positions (1, 2, 3...) in the elevations are UNIQUE across the kitchen — each number is one physical unit` : ''}
 
 ## STEP-BY-STEP METHODOLOGY — FOLLOW THIS EXACTLY
 
-### Step 1: Read ALL dimension lines
-Look at the BOTTOM of the elevation drawing. There will be dimension lines with measurements (usually in inches with fractions like 35 7/16"). Read EVERY dimension from left to right. These dimensions tell you the WIDTH of each cabinet.
+### Step 1: Read ALL dimension lines from EVERY elevation
+Look at the BOTTOM of each elevation drawing. Dimension lines show measurements in inches (e.g., 35 7/16") or millimeters (e.g., 600, 1000). Read EVERY dimension left to right.
 
-### Step 2: Convert inches to cm and round to standard Pronorm widths
-- 11 13/16" = 30cm → standard Pronorm 30cm width
-- 23 5/8" = 60cm → standard Pronorm 60cm width
-- 24" = 61cm → standard Pronorm 60cm width
-- 35 7/16" = 90cm → standard Pronorm 90cm width
-- 7 7/8" or ~8" = 20cm → standard Pronorm 20cm width (filler panel)
-- Small gaps like 5/8", 1 9/16", 1 5/16" are NOT cabinets — they are gaps/margins, SKIP them
+### Step 2: Convert measurements to standard Pronorm widths
+Inches to cm: 7 7/8"≈20cm, 11 13/16"≈30cm, 12 13/16"≈33cm, 14 3/8"≈37cm, 15 3/4"≈40cm, 16 5/16"≈41cm, 22 5/8"≈58cm→60cm, 23 5/8"=60cm, 24"=61cm→60cm, 27 3/4"≈70cm→70cm, 31 1/2"=80cm, 35 7/16"=90cm, 39 3/8"=100cm, 47 1/4"=120cm, 48 1/8"≈122cm→120cm, 50"≈127cm→120cm
+Millimeters: 229mm≈23cm, 600mm=60cm, 610mm=61cm→60cm, 1000mm=100cm
+Round to nearest standard Pronorm width: 20, 23, 25, 30, 40, 45, 50, 60, 70, 80, 90, 100, 110, 120 (cm)
+Small gaps like 1", 1 3/8", 1 9/16", 25mm are NOT cabinets — they are margins, SKIP them.
 
-### Step 3: Match numbered positions to their widths
-The drawing will have numbered circles/labels (1, 2, 3...) on the cabinets. Map each number to its width from the dimension line.
+### Step 3: Identify cabinet ZONES in each elevation
+Each elevation may contain up to THREE vertical zones:
+- **BASE UNITS** (bottom section, ~76cm tall, below countertop): prefix UX, USX, UEX, UVX
+- **WALL UNITS** (upper section, mounted above backsplash): prefix OX, OEX — heights 51cm or 89cm
+- **TALL UNITS** (full-height units like pantries/housings): prefix ST
 
-### Step 4: Identify what each cabinet IS
-⚠️ APPLIANCE CHECK — DO THIS FIRST FOR EVERY POSITION (THIS IS CRITICAL):
-For EACH numbered position, look at the VISUAL CONTENT inside:
-- Does it show wine bottles on shelves, dark/glass door, or a cooling unit? → WINE COOLER → SKIP
-- Does it show an oven cavity, control knobs, or heating elements? → OVEN → SKIP
-- Does it show a fridge/freezer interior? → FRIDGE → SKIP
-- Does it look visually different from the other cabinets (different color, different material, appliance graphic)? → APPLIANCE → SKIP
-If the first position (leftmost unit) looks like a wine cooler or any appliance — DO NOT include it.
-Appliances are NOT Pronorm furniture. They are bought separately. NEVER include them in the output.
+### Step 4: For EACH numbered position — identify the unit
+⚠️ APPLIANCE CHECK FIRST:
+- Fridge/freezer (grey metallic rectangle) → SKIP
+- Oven/microwave (control panels, glass door) → SKIP
+- Cooktop/range (burners, knobs visible) → SKIP
+- Dishwasher (metallic front, control panel) → SKIP
+Appliances are NOT furniture — NEVER include them.
 
-For actual CABINETS:
-- If it's a wide unit (90cm) with horizontal bars/grooves → pull-out unit, use variant -38
-- If it's a 60cm unit with horizontal bars/grooves → pull-out unit, use variant -37 (this is the standard 60cm pull-out)
-- If it's a narrow unit (30cm) → most likely a bottle unit (-41) or larder pull-out (UVX prefix with -41)
-- If it's very narrow (≤20cm) at the end of a run → filler panel (PUX)
-- The LAST narrow unit (closest to the end of the run) is often a UVX larder, not a standard UX
+For actual CABINETS, determine the type by their position and visual:
+**Base units** (below countertop):
+- Standard base unit → UX WIDTH-76-VARIANT
+- Sink base unit (under a sink) → USX WIDTH-76-VARIANT
+- Corner base unit (L-shaped, at a corner) → UEX WIDTH-76-VARIANT
+- Larder pull-out (narrow, tall internal drawers) → UVX WIDTH-76-VARIANT
+- Filler panel (very narrow ≤20cm at end of run) → PUX WIDTH-76
 
-### Step 5: Don't forget non-numbered items
-- Side panel: WS 16-00-02 (always include ONE — it's the panel on the side of the end cabinet)
-- Plinth: SB 11 (the kick board running along the bottom — always include ONE)
-- Filler panel: PUX 20-76 (narrow piece at the end of a run, ~20cm, to fill the gap to the wall)
+**Wall units** (upper cabinets, above backsplash):
+- Standard wall unit → OX WIDTH-HEIGHT-VARIANT (common heights: 51, 76, 89)
+- Corner wall unit → OEX WIDTH-HEIGHT-VARIANT
+- Read the HEIGHT dimensions on the side of the elevation to determine wall unit height
 
-## PRONORM SKU FORMAT: PREFIX WIDTH-HEIGHT-VARIANT
-- UX = standard base unit (X-line). Example: UX 90-76-38
-- UVX = larder/tall pull-out unit. Example: UVX 30-76-41
-- PUX = filler panel. Example: PUX 20-76
-- WS 16-00-02 = side panel (both sides coated)
-- SB 11 = plinth
+**Tall units** (floor to ceiling):
+- Decorative tall panel → ST 25-00-02
 
-### Width = first number: 20, 30, 40, 45, 50, 60, 80, 90, 100, 120 (cm)
-### Height = second number: 76 (ALWAYS use 76 for standard base units under a countertop)
-### Variant = third number:
-- 01 = standard with shelves (hinged door) — ONLY use if you see a simple door with no pull-out handles
-- 37 = pull-out with inner drawer — USE FOR 60cm WIDE pull-out units
-- 38 = full internal pull-out drawers — USE FOR 90cm WIDE pull-out units
-- 41 = bottle pull-out / narrow pull-out — USE FOR 30cm WIDE units
-- DO NOT default to -01. Most modern kitchens use pull-out variants (-37, -38, -41).
+### Step 5: Determine VARIANT codes from visual appearance
+Look at the DOOR STYLE of each cabinet:
+- **Flat door, single handle, X-pattern, diamond groove** → -01 (hinged door with shelves)
+- **Horizontal bars/grooves, pull-out handles** → -37 (60cm), -38 (80-120cm), -41 (30cm bottle)
+- **Multiple horizontal drawer fronts** → -04 (4-drawer) or -32 (drawer combo)
+- **Sink cutout visible or under a sink** → -48 (sink unit) or -01
+Do NOT force a variant — match what you SEE in the drawing.
 
-## CRITICAL RULES
-1. Read the dimension lines CAREFULLY. Each dimension corresponds to one cabinet width.
-2. NEVER include appliances. If a position shows a wine cooler (bottles visible, dark glass, shelving for wine), oven, fridge, or dishwasher — SKIP that position entirely. This is the #1 most common mistake.
-3. ALWAYS use height code 76 for base units.
-4. For 90cm base → variant -38. For 60cm base → variant -37. For 30cm base → variant -41.
-5. The last 30cm unit before the filler is typically UVX 30-76-41 (larder), not UX.
-6. Include exactly ONE WS 16-00-02 (side panel) and ONE SB 11 (plinth).
-7. Include PUX 20-76 if there's a narrow piece (≤20cm) at the end of the run.
+### Step 6: Side panels, fillers, and plinth
+- **Side panels (WS)**: Every exposed cabinet end needs a side panel. Count each exposed end:
+  - WS 25-00-02: standard tall side panel (most common, for tall/full-height runs)
+  - WS 25-768-637: side panel for base+wall combo (when base unit and wall unit on same end)
+  - WS 16-00-02: base-only side panel
+  - WS 16-00-01: alternative base side panel
+  Include the CORRECT number — typically several per kitchen (one per exposed end).
+- **Filler panels**: PUX 20-76 for base, PHX 20-144 for tall gaps
+- **Plinth**: SB 11 — always exactly ONE
+
+## PRONORM SKU PREFIXES
+- UX = base unit | USX = sink base | UEX = corner base | UVX = larder pull-out
+- OX = wall unit | OEX = corner wall | POEX = wall corner filler
+- PUX = base filler | PHX = tall filler
+- WS = side panel | ST = tall decorative panel
+- SB = plinth | HGPX = housing/appliance panel
 
 ## OUTPUT FORMAT
 Return ONLY a valid JSON array. For each item:
 {
   "position": "2",
-  "description": "Pull-out base unit 90cm with internal drawers",
-  "width_mm": 900,
-  "width_cm": 90,
-  "height_description": "standard base (76cm)",
+  "description": "Base unit 80cm hinged door",
+  "width_mm": 800,
+  "width_cm": 80,
+  "height_cm": 76,
   "type": "base",
-  "suggested_sku": "UX 90-76-38",
-  "variant_hint": "pull-out, 90cm wide, horizontal handle bars",
+  "suggested_sku": "UX 80-76-01",
+  "variant_hint": "flat door with X-pattern groove, hinged",
   "confidence": "high",
-  "notes": "35 7/16 inch = 90cm, pull-out handles visible"
+  "notes": "31 1/2 inch = 80cm, single door with handle"
 }
 
-Type must be one of: "base", "larder", "panel", "filler", "plinth"
+Type must be one of: "base", "sink", "corner_base", "larder", "wall", "corner_wall", "tall", "panel", "filler", "plinth", "housing"
 Return ONLY the JSON array, no other text.`;
 
       imageContents.push({ type: 'text', text: prompt });
@@ -405,7 +408,7 @@ Return ONLY the JSON array, no other text.`;
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 4096,
+          max_tokens: 8192,
           messages: [{
             role: 'user',
             content: imageContents
@@ -443,13 +446,15 @@ Return ONLY the JSON array, no other text.`;
           alternatives: parsedCatalog
             .filter((cat) => {
               const t = item.type;
-              if (t === 'base' || t === 'sink' || t === 'hob' || t === 'drawer') return cat.cat.startsWith('Base-');
+              if (t === 'base' || t === 'hob' || t === 'drawer') return cat.cat.startsWith('Base-');
+              if (t === 'sink') return cat.cat === 'Sink' || cat.cat.startsWith('Base-');
+              if (t === 'corner_base') return cat.cat.includes('Corner') || cat.cat.startsWith('Base-');
               if (t === 'wall') return cat.cat.startsWith('Wall');
-              if (t === 'tall' || t === 'housing') return cat.cat.startsWith('Tall');
+              if (t === 'corner_wall') return cat.cat.includes('Corner') || cat.cat.startsWith('Wall');
+              if (t === 'tall' || t === 'housing') return cat.cat.startsWith('Tall') || cat.cat === 'Panel';
               if (t === 'larder') return cat.cat === 'Base-Larder' || cat.cat === 'Base-Std' || cat.cat === 'Tall-Larder';
-              if (t === 'corner') return cat.cat.includes('Corner');
               if (t === 'panel' || t === 'worktop_panel') return cat.cat === 'Panel' || cat.cat === 'Worktop';
-              if (t === 'filler') return cat.cat === 'Filler' || cat.cat === 'Base-Std';
+              if (t === 'filler') return cat.cat === 'Filler' || cat.cat === 'Base-Std' || cat.cat === 'Panel';
               if (t === 'plinth') return cat.cat === 'Plinth';
               return true;
             })
@@ -458,8 +463,8 @@ Return ONLY the JSON array, no other text.`;
               const aDiff = Math.abs((a.width || 0) - (item.width_cm || 0));
               const bDiff = Math.abs((b.width || 0) - (item.width_cm || 0));
               if (aDiff !== bDiff) return aDiff - bDiff;
-              const aX = /^(UX|UVX|PUX|PHX)\s/.test(a.sku) ? 0 : 1;
-              const bX = /^(UX|UVX|PUX|PHX)\s/.test(b.sku) ? 0 : 1;
+              const aX = /^(UX|UVX|PUX|PHX|OX|OEX|USX|UEX|ST|POEX|HGPX)\s/.test(a.sku) ? 0 : 1;
+              const bX = /^(UX|UVX|PUX|PHX|OX|OEX|USX|UEX|ST|POEX|HGPX)\s/.test(b.sku) ? 0 : 1;
               return aX - bX;
             })
             .slice(0, 40)
@@ -485,52 +490,54 @@ Return ONLY the JSON array, no other text.`;
       const hasSku = (pattern) => postProcessed.some(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern));
       const countSku = (pattern) => postProcessed.filter(i => i.suggestedSku && i.suggestedSku.replace(/\s+/g, '').includes(pattern)).length;
 
-      // 1. Ensure UVX 30-76-41 (larder) exists
-      if (!hasSku('UVX')) {
-        const ux30Count = countSku('UX30-76-41');
-        if (ux30Count >= 3) {
-          // 3+ UX 30s detected: convert the last one to UVX (keeps 2× UX + 1× UVX)
-          for (let i = postProcessed.length - 1; i >= 0; i--) {
-            if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
-              const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
-              if (uvxMatch) {
-                postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
+      // Only apply auto-add post-processing for simple kitchens (≤12 detected items)
+      // Complex multi-wall kitchens have too much variety for auto-adds to be safe
+      const isSimpleKitchen = postProcessed.length <= 12;
+
+      if (isSimpleKitchen) {
+        // 1. Ensure UVX 30-76-41 (larder) exists for simple kitchens
+        if (!hasSku('UVX')) {
+          const ux30Count = countSku('UX30-76-41');
+          if (ux30Count >= 3) {
+            for (let i = postProcessed.length - 1; i >= 0; i--) {
+              if (postProcessed[i].suggestedSku?.replace(/\s+/g, '') === 'UX30-76-41') {
+                const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
+                if (uvxMatch) {
+                  postProcessed[i] = { ...postProcessed[i], suggestedSku: uvxMatch.sku, suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel, description: 'Larder unit 30cm (auto-corrected)', type: 'larder' };
+                }
+                break;
               }
-              break;
+            }
+          } else if (ux30Count >= 1) {
+            const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
+            if (uvxMatch) {
+              const plinthIdx = postProcessed.findIndex(i => i.type === 'plinth' || i.type === 'filler');
+              const insertIdx = plinthIdx >= 0 ? plinthIdx : postProcessed.length;
+              postProcessed.splice(insertIdx, 0, {
+                position: null, description: 'Larder unit 30cm (auto-added)', width_mm: 300, width_cm: 30,
+                type: 'larder', suggested_sku: 'UVX 30-76-41', suggestedSku: uvxMatch.sku,
+                suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel,
+                confidence: 'medium', notes: 'Auto-added: larder pull-out is standard in modern kitchens',
+                alternatives: parsedCatalog.filter(c => c.cat === 'Base-Larder' || (c.cat === 'Base-Std' && /^UVX/.test(c.sku))).slice(0, 20)
+              });
             }
           }
-        } else if (ux30Count >= 1) {
-          // Only 1-2 UX 30s detected: add a UVX rather than converting (preserves existing UX 30s)
-          const uvxMatch = parsedCatalog.find(c => c.sku === 'UVX 30-76-41');
-          if (uvxMatch) {
-            // Insert before plinth/filler
-            const plinthIdx = postProcessed.findIndex(i => i.type === 'plinth' || i.type === 'filler');
+        }
+
+        // 2. Ensure PUX 20-76 (filler) exists for simple kitchens
+        if (!hasSku('PUX')) {
+          const puxMatch = parsedCatalog.find(c => c.sku === 'PUX 20-76');
+          if (puxMatch) {
+            const plinthIdx = postProcessed.findIndex(i => i.type === 'plinth');
             const insertIdx = plinthIdx >= 0 ? plinthIdx : postProcessed.length;
             postProcessed.splice(insertIdx, 0, {
-              position: null, description: 'Larder unit 30cm (auto-added)', width_mm: 300, width_cm: 30,
-              type: 'larder', suggested_sku: 'UVX 30-76-41', suggestedSku: uvxMatch.sku,
-              suggestedCat: uvxMatch.cat, matchedCatLabel: uvxMatch.catLabel,
-              confidence: 'medium', notes: 'Auto-added: larder pull-out is standard in modern kitchens',
-              alternatives: parsedCatalog.filter(c => c.cat === 'Base-Larder' || (c.cat === 'Base-Std' && /^UVX/.test(c.sku))).slice(0, 20)
+              position: null, description: 'Filler panel 20cm (auto-added)', width_mm: 200, width_cm: 20,
+              type: 'filler', suggested_sku: 'PUX 20-76', suggestedSku: puxMatch.sku,
+              suggestedCat: puxMatch.cat, matchedCatLabel: puxMatch.catLabel,
+              confidence: 'medium', notes: 'Auto-added: filler panels are standard at end of cabinet runs',
+              alternatives: parsedCatalog.filter(c => c.cat === 'Filler' || (c.cat === 'Base-Std' && /^PUX/.test(c.sku))).slice(0, 20)
             });
           }
-        }
-      }
-
-      // 2. Ensure PUX 20-76 (filler) exists: if missing, add it before plinth
-      if (!hasSku('PUX20-76')) {
-        const puxMatch = parsedCatalog.find(c => c.sku === 'PUX 20-76');
-        if (puxMatch) {
-          const plinthIdx = postProcessed.findIndex(i => i.type === 'plinth');
-          const insertIdx = plinthIdx >= 0 ? plinthIdx : postProcessed.length;
-          const puxItem = {
-            position: null, description: 'Filler panel 20cm (auto-added)', width_mm: 200, width_cm: 20,
-            type: 'filler', suggested_sku: 'PUX 20-76', suggestedSku: puxMatch.sku,
-            suggestedCat: puxMatch.cat, matchedCatLabel: puxMatch.catLabel,
-            confidence: 'medium', notes: 'Auto-added: filler panels are standard at end of cabinet runs',
-            alternatives: parsedCatalog.filter(c => c.cat === 'Filler' || (c.cat === 'Base-Std' && /^PUX/.test(c.sku))).slice(0, 20)
-          };
-          postProcessed.splice(insertIdx, 0, puxItem);
         }
       }
 
