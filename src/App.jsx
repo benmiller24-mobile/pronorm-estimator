@@ -331,11 +331,11 @@ export default function App({ order, onBack }) {
       if (r.id !== activeRoom) return r;
       if (isSqm) {
         const defaultMat = item.prices.findIndex(p => p > 0);
-        const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '', panelMaterial: defaultMat >= 0 ? defaultMat : 0, attachedSCs: [] };
+        const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), isSqm: true, panelW: '', panelH: '', panelMaterial: defaultMat >= 0 ? defaultMat : 0, attachedSCs: [], note: '' };
         return { ...r, items: [...r.items, newItem] };
       }
       // Always create a new line item so each can have its own hinge/finished end
-      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [], hinge: '', finEnd: '', finEndSSEH: '', finEndSSED: '', finEndMat: 0, pgOverride: '', customPts: '' };
+      const newItem = { ...item, qty: 1, id: Date.now() + Math.random(), attachedSCs: [], hinge: '', finEnd: '', finEndSSEH: '', finEndSSED: '', finEndMat: 0, pgOverride: '', customPts: '', note: '' };
       setSelectedItemId(newItem.id);
       return { ...r, items: [...r.items, newItem] };
     }));
@@ -616,6 +616,10 @@ export default function App({ order, onBack }) {
       const fePrice = itemFinEndTotal(i);
       const total = itemFullTotal(i);
       let html = '<tr><td>' + i.sku + sqmNote + '</td><td>' + i.catLabel + '</td><td>' + hingeLabel + '</td><td>' + feLabel + (feCode ? ' (' + feCode + ')' : '') + '</td><td class="r">' + i.qty + '</td><td class="r">' + unitLabel + '</td><td class="r">' + fmtPts(total) + '</td>' + costTd(total) + '</tr>';
+      if (i.note && i.note.trim()) {
+        const safeNote = i.note.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html += '<tr class="note"><td colspan="' + (showCost ? 8 : 7) + '" style="padding-left:24px;font-size:11px;color:#5c544a;font-style:italic;background:#faf8f3">↳ Note: ' + safeNote + '</td></tr>';
+      }
       if (feCode && fePrice > 0) {
         const feMat = (PANEL_MATERIALS.find(m=>m.idx===(i.finEndMat||0))||{}).code||'';
         const feUnit = getSSEPrice(Number(i.finEndSSEH), Number(i.finEndSSED), i.finEndMat || 0);
@@ -1092,6 +1096,26 @@ export default function App({ order, onBack }) {
                       <td onClick={e => e.stopPropagation()}>
                         <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.danger, fontSize: 14 }}
                           onClick={() => updateQty(item.id, 0, item.isSqm)}>×</button>
+                      </td>
+                    </tr>
+
+                    {/* ── Inline per-item Note ── */}
+                    <tr style={{
+                      borderBottom: (item.isSqm || item.finEnd || attachedSCs.length > 0) ? 'none' : `1px solid ${C.borderLight}`,
+                      background: isSelected ? 'rgba(74,111,165,0.06)' : 'transparent',
+                      borderLeft: selBorder,
+                    }} onClick={e => e.stopPropagation()}>
+                      <td colSpan={showCost ? 9 : 8} style={{ padding: '2px 0 6px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 10, color: C.textTer, fontWeight: 600, whiteSpace: 'nowrap' }}>NOTE:</span>
+                          <input
+                            type="text"
+                            style={{ ...s.input, flex: 1, fontSize: 11, padding: '3px 6px', borderColor: item.note ? C.gold : C.border, background: item.note ? C.goldMuted : C.card }}
+                            placeholder="Add a note for this item (e.g., finish, handle, hardware)…"
+                            value={item.note || ''}
+                            onChange={e => updateItemProp(item.id, 'note', e.target.value)}
+                          />
+                        </div>
                       </td>
                     </tr>
 
