@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -20,6 +21,13 @@ function json(statusCode, body, event) {
   return { statusCode, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(event) }, body: JSON.stringify(body) };
 }
 
+// Constant-time comparison (hash both sides so lengths always match).
+function secretsMatch(a, b) {
+  const ha = createHash('sha256').update(String(a)).digest();
+  const hb = createHash('sha256').update(String(b)).digest();
+  return timingSafeEqual(ha, hb);
+}
+
 export async function handler(event) {
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
@@ -29,7 +37,7 @@ export async function handler(event) {
   // Auth check — require shared secret
   const authHeader = event.headers.authorization || '';
   const token = authHeader.replace('Bearer ', '');
-  if (!ADMIN_SECRET || token !== ADMIN_SECRET) {
+  if (!ADMIN_SECRET || ADMIN_SECRET.length < 32 || !secretsMatch(token, ADMIN_SECRET)) {
     return json(401, { error: 'Unauthorized' }, event);
   }
 
@@ -43,8 +51,14 @@ export async function handler(event) {
 
     // ── LIST USERS ──
     if (method === 'GET') {
-      const { data: { users }, error } = await supabase.auth.admin.listUsers();
-      if (error) return json(500, { error: error.message }, event);
+      // listUsers() is paginated (default 50/page); walk every page.
+      const users = [];
+      for (let page = 1; page <= 100; page++) {
+        const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) return json(500, { error: error.message }, event);
+        users.push(...data.users);
+        if (data.users.length < 1000) break;
+      }
 
       // Enrich with profile data
       const { data: profiles } = await supabase.from('profiles').select('*');
