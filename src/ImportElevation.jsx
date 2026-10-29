@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { supabase } from './supabaseClient.js';
 import { parseData, RAW_DATA, CATEGORIES, CATEGORY_LABELS, PG_NAMES } from './data.js';
 import { useAuth } from './AuthContext.jsx';
 import { createOrder } from './useAutoSave.js';
@@ -62,14 +63,77 @@ function buildXLineReference(catalog) {
   return xLineBase.map(i => `${i.sku} (${i.width}cm)`).join(', ');
 }
 
+const MAX_UPLOAD_B64 = 5.5 * 1024 * 1024; // stays under the 6 MB function payload cap
+const MAX_EDGE_PX = 1568;
+const POLL_INTERVAL_MS = 2500;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Resize a data-URL image so its long edge is <= MAX_EDGE_PX. PNG line drawings
+// stay PNG when small; everything else is re-encoded as high-quality JPEG.
+async function prepareImage(dataUrl, mediaType) {
+  const img = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Could not read one of the images'));
+    el.src = dataUrl;
+  });
+  const scale = Math.min(1, MAX_EDGE_PX / Math.max(img.naturalWidth, img.naturalHeight));
+  const original = dataUrl.split(',')[1];
+  if (scale === 1 && original.length < 1.5 * 1024 * 1024) {
+    return { mediaType, data: original };
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; // flatten transparency for JPEG
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const out = canvas.toDataURL('image/jpeg', 0.9);
+  return { mediaType: 'image/jpeg', data: out.split(',')[1] };
+}
+
+// Start a server-side vision job and poll until it finishes.
+async function runVisionJob({ prompt, images, onProgress }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.');
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` };
+  const jobId = crypto.randomUUID();
+
+  onProgress('Sending drawings to Claude Vision...');
+  const start = await fetch('/.netlify/functions/analyze-elevation-background', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jobId, prompt, images }),
+  });
+  if (start.status !== 202 && !start.ok) {
+    throw new Error(`Could not start analysis (${start.status})`);
+  }
+
+  const started = Date.now();
+  onProgress('Claude is reading the drawings (this can take a minute or two)...');
+  while (Date.now() - started < POLL_TIMEOUT_MS) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    const { data: { session: s } } = await supabase.auth.getSession();
+    const res = await fetch(`/.netlify/functions/analyze-elevation-status?job=${jobId}`, {
+      headers: { Authorization: `Bearer ${s?.access_token || session.access_token}` },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Status check failed (${res.status})`);
+    if (body.status === 'done') return body.text;
+    if (body.status === 'error') throw new Error(body.error || 'Analysis failed');
+  }
+  throw new Error('Analysis timed out. Please try again.');
+}
+
 export default function ImportElevation({ onBack, onOrderCreated }) {
   const { user } = useAuth();
   const elevInputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
   const floorInputRef = useRef(null);
 
   // States
-  const BUILT_IN_KEY = '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';
-  const [apiKey] = useState(BUILT_IN_KEY);
+  // Claude Vision runs server-side (netlify/functions/analyze-elevation-background.mjs);
+  // no API key ever ships to the browser.
   // Support up to 4 elevation images
   const [elevFiles, setElevFiles] = useState([null, null, null, null]);
   const [elevPreviews, setElevPreviews] = useState([null, null, null, null]);
@@ -279,21 +343,17 @@ export default function ImportElevation({ onBack, onOrderCreated }) {
     setAnalysisLog('Preparing images...');
 
     try {
-      // Build image content blocks from all uploaded images
-      const imageContents = [];
-
+      // Downscale each drawing before upload: Claude Vision works at <=1568px on
+      // the long edge anyway, and this keeps the request well under the
+      // function payload limit.
+      const images = [];
       for (const img of uploadedImages) {
-        const b64 = img.preview.split(',')[1];
-        imageContents.push({
-          type: 'image',
-          source: { type: 'base64', media_type: img.file.type, data: b64 }
-        });
-        imageContents.push({
-          type: 'text',
-          text: `↑ This is labeled "${img.label}" - ${img.label.toLowerCase().includes('floor') || img.label.toLowerCase().includes('plan')
-            ? 'a FLOORPLAN view (top-down view showing cabinet depth, layout, and spatial arrangement).'
-            : 'an ELEVATION view (front view showing cabinet doors, heights, and handle positions).'}`
-        });
+        const prepared = await prepareImage(img.preview, img.file.type);
+        images.push({ label: img.label, media_type: prepared.mediaType, data: prepared.data });
+      }
+      const payloadBytes = images.reduce((n, i) => n + i.data.length, 0);
+      if (payloadBytes > MAX_UPLOAD_B64) {
+        throw new Error('These drawings are too large to analyze together. Try fewer or smaller images.');
       }
 
       setAnalysisLog('Sending to Claude Vision API...');
@@ -396,35 +456,10 @@ Return ONLY a valid JSON array. For each item:
 Type must be one of: "base", "sink", "corner_base", "larder", "wall", "corner_wall", "tall", "panel", "filler", "plinth", "housing"
 Return ONLY the JSON array, no other text.`;
 
-      imageContents.push({ type: 'text', text: prompt });
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 8192,
-          messages: [{
-            role: 'user',
-            content: imageContents
-          }]
-        })
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error?.message || 'Claude API error');
-      }
+      const content = await runVisionJob({ prompt, images, onProgress: setAnalysisLog });
 
       setAnalysisLog('Parsing results...');
 
-      const data = await response.json();
-      const content = data.content?.[0]?.text;
       if (!content) throw new Error('No response from Claude');
 
       // Parse JSON from response
