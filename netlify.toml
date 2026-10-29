@@ -11,13 +11,8 @@
   [headers.values]
     Content-Security-Policy = "frame-ancestors 'self' https://www.pronormusa.com https://pronormusa.com https://estimator.pronormusa.com"
 
-# Functions must be routed BEFORE the SPA catch-all
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-  force = true
-
+# /.netlify/functions/* is routed by Netlify before any redirect, so the SPA
+# catch-all below never shadows it (a redirect rule for that path is invalid).
 [[redirects]]
   from = "/*"
   to = "/index.html"
